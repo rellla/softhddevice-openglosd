@@ -1,9 +1,13 @@
 #ifndef __SOFTHDDEVICE_OPENGLOSD_H
 #define __SOFTHDDEVICE_OPENGLOSD_H
 
+#ifdef USE_GLES2
+#include "gles_private.h"
+#else
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <GL/gl.h>
+#endif
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -217,6 +221,8 @@ private:
     eShaderType shader;
     GLuint vao;
     GLuint vbo;
+    GLuint positionLoc;
+    GLuint texCoordsLoc;
     int sizeVertex1;
     int sizeVertex2;
     int numVertices;
@@ -231,6 +237,10 @@ public:
     void EnableBlending(void);
     void DisableBlending(void);
     void SetShaderColor(GLint color);
+#ifdef USE_GLES2
+    void SetShaderBorderColor(GLint bcolor);
+    void SetShaderTexture(GLint value);
+#endif
     void SetShaderAlpha(GLint alpha);
     void SetShaderProjectionMatrix(GLint width, GLint height);
     void SetVertexData(GLfloat *vertices, int count = 0);
@@ -284,6 +294,9 @@ private:
     GLfloat x, y;
     GLfloat drawPortX, drawPortY;
     GLint transparency;
+#ifdef USE_GLES2
+    GLint bcolor;
+#endif
 public:
     cOglCmdRenderFbToBufferFb(cOglFb *fb, cOglFb *buffer, GLint x, GLint y, GLint transparency, GLint drawPortX, GLint drawPortY);
     virtual ~cOglCmdRenderFbToBufferFb(void) {};
@@ -294,7 +307,12 @@ public:
 class cOglCmdCopyBufferToOutputFb : public cOglCmd {
 private:
     cOglOutputFb *oFb;
+#ifdef USE_GLES2
+    GLfloat x, y;
+    GLint bcolor;
+#else
     GLint x, y;
+#endif
 public:
     cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y);
     virtual ~cOglCmdCopyBufferToOutputFb(void) {};
@@ -374,6 +392,9 @@ private:
     GLint x, y, width, height;
     bool overlay;
     GLfloat scaleX, scaleY;
+#ifdef USE_GLES2
+    GLint bcolor;
+#endif
 public:
     cOglCmdDrawImage(cOglFb *fb, tColor *argb, GLint width, GLint height, GLint x, GLint y, bool overlay = true, double scaleX = 1.0f, double scaleY = 1.0f);
     virtual ~cOglCmdDrawImage(void);
@@ -385,6 +406,9 @@ class cOglCmdDrawTexture : public cOglCmd {
 private:
     sOglImage *imageRef;
     GLint x, y;
+#ifdef USE_GLES2
+    GLint bcolor;
+#endif
 public:
     cOglCmdDrawTexture(cOglFb *fb, sOglImage *imageRef, GLint x, GLint y);
     virtual ~cOglCmdDrawTexture(void) {};

@@ -183,6 +183,8 @@ extern void *GetVDPAUDevice(void);
 extern void *GetVDPAUProcAdress(void);
     /// Get VDPAU OSD Output Surface
 extern void *GetVDPAUOutputSurface(void);
+    /// Get VDPAU GetProcess
+extern void GetVDPAUProc(const uint32_t id, void *addr, const char *name);
 
     /// Get OSD size.
 extern void VideoGetOsdSize(int *, int *);

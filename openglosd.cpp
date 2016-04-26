@@ -2,6 +2,50 @@
 #include <algorithm>
 #include "openglosd.h"
 
+#ifdef USE_GLES2
+#include <stdio.h>
+#include <stdlib.h>
+
+/* This is needed for the GLES2 GL_CLAMP_TO_BORDER workaround */
+#define BORDERCOLOR 0x88888888
+
+/* declare NV functions */
+static GLVDPAUInitNV glVDPAUInitNV;
+static GLVDPAUFiniNV glVDPAUFiniNV;
+static GLVDPAURegisterOutputSurfaceNV glVDPAURegisterOutputSurfaceNV;
+static GLVDPAURegisterVideoSurfaceNV glVDPAURegisterVideoSurfaceNV;
+static GLVDPAUIsSurfaceNV glVDPAUIsSurfaceNV;
+static GLVDPAUUnregisterSurfaceNV glVDPAUUnregisterSurfaceNV;
+static GLVDPAUSurfaceAccessNV glVDPAUSurfaceAccessNV;
+static GLVDPAUMapSurfacesNV glVDPAUMapSurfacesNV;
+static GLVDPAUUnmapSurfacesNV glVDPAUUnmapSurfacesNV;
+static GLVDPAUGetSurfaceivNV glVDPAUGetSurfaceivNV;
+
+/* Global EGL variables */
+EGLSurface eglSurface = EGL_NO_SURFACE;
+EGLContext eglContext = EGL_NO_CONTEXT;
+EGLDisplay eglDisplay = EGL_NO_DISPLAY;
+static EGLint const config_attribute_list[] = {
+    EGL_RED_SIZE, 8,
+    EGL_GREEN_SIZE, 8,
+    EGL_BLUE_SIZE, 8,
+    EGL_ALPHA_SIZE, 8,
+    EGL_BUFFER_SIZE, 32,
+    EGL_STENCIL_SIZE, 0,
+    EGL_DEPTH_SIZE, 0,
+    EGL_SAMPLES, 4,
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT | EGL_PIXMAP_BIT,
+    EGL_NONE
+};
+
+static const EGLint context_attribute_list[] =
+{
+    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_NONE
+};
+#endif
+
 /****************************************************************************************
 * Helpers
 ****************************************************************************************/
@@ -16,7 +60,7 @@ void ConvertColor(const GLint &colARGB, glm::vec4 &col) {
 void glCheckError(const char *stmt, const char *fname, int line) {
     GLint err = glGetError();
     if (err != GL_NO_ERROR)
-	esyslog("[softhddev]GL Error (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
+        esyslog("[softhddev]GL Error (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
 }
 
 #ifdef DEBUG_GL
@@ -28,10 +72,161 @@ void glCheckError(const char *stmt, const char *fname, int line) {
 #define GL_CHECK(stmt) stmt
 #endif
 
+#ifdef USE_GLES2
+void eglCheckError(const char *stmt, const char *fname, int line) {
+    EGLint err = eglGetError();
+    if (err != EGL_SUCCESS)
+        esyslog("[softhddev]EGL ERROR (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
+}
+
+#ifdef DEBUG_GL
+#define EGL_CHECK(stmt) do { \
+    stmt; \
+    eglCheckError(#stmt, __FILE__, __LINE__); \
+    } while (0)
+#else
+#define EGL_CHECK(stmt) stmt
+#endif
+
+void *glesInit(void)
+{
+    GetVDPAUProc(VDP_FUNC_ID_Init_NV, &glVDPAUInitNV, "glVDPAUInitNV");
+    GetVDPAUProc(VDP_FUNC_ID_Fini_NV, &glVDPAUFiniNV, "glVDPAUFiniNV");
+    GetVDPAUProc(VDP_FUNC_ID_RegisterOutputSurface_NV, &glVDPAURegisterOutputSurfaceNV, "glVDPAURegisterOutputSurfaceNV");
+    GetVDPAUProc(VDP_FUNC_ID_RegisterVideoSurface_NV, &glVDPAURegisterVideoSurfaceNV, "glVDPAURegisterVideoSurfaceNV");
+    GetVDPAUProc(VDP_FUNC_ID_IsSurface_NV, &glVDPAUIsSurfaceNV, "glVDPAUIsSurfaceNV");
+    GetVDPAUProc(VDP_FUNC_ID_UnregisterSurface_NV, &glVDPAUUnregisterSurfaceNV, "glVDPAUUnregisterSurfaceNV");
+    GetVDPAUProc(VDP_FUNC_ID_SurfaceAccess_NV, &glVDPAUSurfaceAccessNV, "glVDPAUSurfaceAccessNV");
+    GetVDPAUProc(VDP_FUNC_ID_MapSurfaces_NV, &glVDPAUMapSurfacesNV, "glVDPAUMapSurfacesNV");
+    GetVDPAUProc(VDP_FUNC_ID_UnmapSurfaces_NV, &glVDPAUUnmapSurfacesNV, "glVDPAUUnmapSurfacesNV");
+    GetVDPAUProc(VDP_FUNC_ID_GetSurfaceiv_NV, &glVDPAUGetSurfaceivNV, "glVDPAUGetSurfaceivNV");
+
+    return NULL;
+}
+
+void eglAcquireContext()
+{
+    EGL_CHECK(eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext));
+}
+
+void eglReleaseContext()
+{
+    EGL_CHECK(eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
+}
+#endif
+
 /****************************************************************************************
 * cShader
 ****************************************************************************************/
+#ifdef USE_GLES2
+const char *rectVertexShader = 
+"#version 100 \n\
+\
+attribute vec2 position; \
+varying vec4 rectCol; \
+uniform vec4 inColor; \
+uniform mat4 projection; \
+\
+void main() \
+{ \
+    gl_Position = projection * vec4(position.x, position.y, 0.0, 1.0); \
+    rectCol = inColor; \
+} \
+";
 
+const char *rectFragmentShader = 
+"#version 100 \n\
+precision mediump float; \
+varying vec4 rectCol; \
+\
+void main() \
+{ \
+    gl_FragColor = rectCol; \
+} \
+";
+
+const char *textureVertexShader = 
+"#version 100 \n\
+\
+attribute vec2 position; \
+attribute vec2 texCoords; \
+\
+varying vec2 TexCoords; \
+varying vec4 alphaValue;\
+\
+uniform vec4 bColor; \
+uniform mat4 projection; \
+uniform vec4 alpha; \
+\
+void main() \
+{ \
+    gl_Position = projection * vec4(position.x, position.y, 0.0, 1.0); \
+    TexCoords = texCoords; \
+    alphaValue = alpha; \
+} \
+";
+
+const char *textureFragmentShader = 
+"#version 100 \n\
+precision mediump float; \
+varying vec2 TexCoords; \
+varying vec4 alphaValue; \
+\
+uniform vec4 bColor; \
+uniform sampler2D screenTexture; \
+\
+float clamp_to_border_factor (vec2 coords) \
+{ \
+    bvec2 out1 = greaterThan (coords, vec2 (1,1)); \
+    bvec2 out2 = lessThan (coords, vec2 (0,0)); \
+    bool do_clamp = (any (out1) || any (out2)); \
+    return float (!do_clamp); \
+} \
+\
+void main() \
+{ \
+    vec4 color = texture2D(screenTexture, TexCoords) * alphaValue; \
+    float f = clamp_to_border_factor (TexCoords); \
+    gl_FragColor = mix (bColor, color, f); \
+} \
+";
+
+const char *textVertexShader = 
+"#version 100 \n\
+\
+attribute vec2 position; \
+attribute vec2 texCoords; \
+\
+varying vec2 TexCoords; \
+varying vec4 textColor; \
+\
+uniform mat4 projection; \
+uniform vec4 inColor; \
+\
+void main() \
+{ \
+    gl_Position = projection * vec4(position.x, position.y, 0.0, 1.0); \
+    TexCoords = texCoords; \
+    textColor = inColor; \
+} \
+";
+
+const char *textFragmentShader = 
+"#version 100 \n\
+precision mediump float; \
+varying vec2 TexCoords; \
+varying vec4 textColor; \
+\
+uniform sampler2D glyphTexture; \
+\
+void main() \
+{  \
+    vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(glyphTexture, TexCoords).r); \
+    gl_FragColor = textColor * sampled; \
+} \
+";
+
+#else /* OpenGL shader */
 
 const char *rectVertexShader = 
 "#version 330 core \n\
@@ -129,6 +324,7 @@ void main() \
     color = textColor * sampled; \
 } \
 ";
+#endif
 
 static cShader *Shaders[stCount]; 
 
@@ -214,6 +410,10 @@ bool cShader::Compile(const char *vertexCode, const char *fragmentCode) {
     GL_CHECK(id = glCreateProgram());
     GL_CHECK(glAttachShader(id, sVertex));
     GL_CHECK(glAttachShader(id, sFragment));
+#ifdef USE_GLES2
+    GL_CHECK(glBindAttribLocation(id, 0, "position"));
+    GL_CHECK(glBindAttribLocation(id, 1, "texCoords"));
+#endif
     GL_CHECK(glLinkProgram(id));
     if (!CheckCompileErrors(id, true))
         return false;
@@ -283,17 +483,27 @@ void cOglGlyph::LoadTexture(FT_BitmapGlyph ftGlyph) {
     GL_CHECK(glPixelStorei(GL_UNPACK_ALIGNMENT, 1));
     GL_CHECK(glGenTextures(1, &texture));
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
+
     GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
+#ifdef USE_GLES2
+        GL_LUMINANCE,
+#else
         GL_RED,
+#endif
         ftGlyph->bitmap.width,
         ftGlyph->bitmap.rows,
         0,
+#ifdef USE_GLES2
+        GL_LUMINANCE,
+#else
         GL_RED,
+#endif
         GL_UNSIGNED_BYTE,
         ftGlyph->bitmap.buffer
     ));
+
     // Set texture options
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
@@ -467,10 +677,16 @@ bool cOglFb::Init(void) {
     GL_CHECK(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+#ifdef USE_GLES2
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
+#else
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER));
+#endif
     GL_CHECK(glGenFramebuffers(1, &fb));
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+
     GL_CHECK(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0));
 
     GLenum fbstatus;
@@ -490,11 +706,19 @@ void cOglFb::Bind(void) {
 }
 
 void cOglFb::BindRead(void) {
+#ifdef USE_GLES2
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+#else
     GL_CHECK(glBindFramebuffer(GL_READ_FRAMEBUFFER, fb));
+#endif
 }
 
 void cOglFb::BindWrite(void) {
+#ifdef USE_GLES2
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+#else
     GL_CHECK(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb));
+#endif
 }
 
 void cOglFb::Unbind(void) {
@@ -509,32 +733,50 @@ bool cOglFb::BindTexture(void) {
     return true;
 }
 
+#ifndef USE_GLES2
 void cOglFb::Blit(GLint destX1, GLint destY1, GLint destX2, GLint destY2) {
     GL_CHECK(glBlitFramebuffer(0, 0, width, height, destX1, destY1, destX2, destY2, GL_COLOR_BUFFER_BIT, GL_NEAREST));
     GL_CHECK(glFlush());
 }
+#endif
 
 /****************************************************************************************
 * cOglOutputFb
 ****************************************************************************************/
 cOglOutputFb::cOglOutputFb(GLint width, GLint height) : cOglFb(width, height, width, height) {
     surface = 0;
+#ifdef USE_GLES2
+    this->width = width;
+    this->height = height;
+#endif
 }
 
 cOglOutputFb::~cOglOutputFb(void) {
+#ifdef USE_GLES2
+    eglReleaseContext();
+#endif
     glVDPAUUnregisterSurfaceNV(surface);
+#ifdef USE_GLES2
+    eglAcquireContext();
+#endif
 }
 
 bool cOglOutputFb::Init(void) {
     //fetching osd vdpau output surface from softhddevice
     void *vdpauOutputSurface = GetVDPAUOutputSurface();
     GL_CHECK(glGenTextures(1, &texture));
+#ifdef USE_GLES2
+    eglReleaseContext();
+#endif
     //register surface for texture
     surface = glVDPAURegisterOutputSurfaceNV(vdpauOutputSurface, GL_TEXTURE_2D, 1, &texture);
     //set write access to surface
     glVDPAUSurfaceAccessNV(surface, GL_WRITE_DISCARD_NV);
     //create framebuffer
     glVDPAUMapSurfacesNV (1, &surface);
+#ifdef USE_GLES2
+    eglAcquireContext();
+#endif
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
     GL_CHECK(glGenFramebuffers(1, &fb));
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
@@ -550,12 +792,27 @@ bool cOglOutputFb::Init(void) {
 }
 
 void cOglOutputFb::BindWrite(void) {
+#ifdef USE_GLES2
+    eglReleaseContext();
+#endif
     glVDPAUMapSurfacesNV(1, &surface);
+#ifdef USE_GLES2
+    eglAcquireContext();
+    GL_CHECK(glViewport(0, 0, width, height));
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+#else
     GL_CHECK(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb));
+#endif
 }
 
 void cOglOutputFb::Unbind(void) {
+#ifdef USE_GLES2
+    eglReleaseContext();
+#endif
     glVDPAUUnmapSurfacesNV(1, &surface);
+#ifdef USE_GLES2
+    eglAcquireContext();
+#endif
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, 0));
 }
 
@@ -566,7 +823,11 @@ static cOglVb *VertexBuffers[vbCount];
 
 cOglVb::cOglVb(int type) {
     this->type = (eVertexBufferType)type;
+    positionLoc = 0;
+    texCoordsLoc = 1;
+#ifndef USE_GLES2
     vao = 0;
+#endif
     vbo = 0;
     sizeVertex1 = 0;
     sizeVertex2 = 0;
@@ -615,32 +876,52 @@ bool cOglVb::Init(void) {
         drawMode = GL_TRIANGLES;
         shader = stText;
     }
-    GL_CHECK(glGenVertexArrays(1, &vao));
+
     GL_CHECK(glGenBuffers(1, &vbo));
-    GL_CHECK(glBindVertexArray(vao));
     GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+
+#ifndef USE_GLES2
+    GL_CHECK(glGenVertexArrays(1, &vao));
+    GL_CHECK(glBindVertexArray(vao));
+#endif
 
     GL_CHECK(glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * numVertices, NULL, GL_DYNAMIC_DRAW));
 
-    GL_CHECK(glEnableVertexAttribArray(0));
-    GL_CHECK(glVertexAttribPointer(0, sizeVertex1, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)0));
+    GL_CHECK(glEnableVertexAttribArray(positionLoc));
+    GL_CHECK(glVertexAttribPointer(positionLoc, sizeVertex1, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)0));
     if (sizeVertex2 > 0) {
-        GL_CHECK(glEnableVertexAttribArray(1));
-        GL_CHECK(glVertexAttribPointer(1, sizeVertex2, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)(sizeVertex1 * sizeof(GLfloat))));
+        GL_CHECK(glEnableVertexAttribArray(texCoordsLoc));
+        GL_CHECK(glVertexAttribPointer(texCoordsLoc, sizeVertex2, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)(sizeVertex1 * sizeof(GLfloat))));
     }
 
     GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
-    GL_CHECK(glBindVertexArray(0));
 
+#ifndef USE_GLES2
+    GL_CHECK(glBindVertexArray(0));
+#endif
     return true;
 }
 
 void cOglVb::Bind(void) {
+#ifdef USE_GLES2
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+    GL_CHECK(glEnableVertexAttribArray(positionLoc));
+    GL_CHECK(glVertexAttribPointer(positionLoc, sizeVertex1, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)0));
+    if (sizeVertex2 > 0) {
+        GL_CHECK(glEnableVertexAttribArray(texCoordsLoc));
+        GL_CHECK(glVertexAttribPointer(texCoordsLoc, sizeVertex2, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)(sizeVertex1 * sizeof(GLfloat))));
+    }
+#else
     GL_CHECK(glBindVertexArray(vao));
+#endif
 }
 
 void cOglVb::Unbind(void) {
+#ifdef USE_GLES2
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
+#else
     GL_CHECK(glBindVertexArray(0));
+#endif
 }
 
 void cOglVb::ActivateShader(void) {
@@ -661,6 +942,18 @@ void cOglVb::SetShaderColor(GLint color) {
     ConvertColor(color, col);
     Shaders[shader]->SetVector4f("inColor", col.r, col.g, col.b, col.a);
 }
+
+#ifdef USE_GLES2
+void cOglVb::SetShaderBorderColor(GLint color) {
+    glm::vec4 col;
+    ConvertColor(color, col);
+    Shaders[shader]->SetVector4f("bColor", col.r, col.g, col.b, col.a);
+}
+
+void cOglVb::SetShaderTexture(GLint value) {
+    Shaders[shader]->SetInteger("screenTexture", value);
+}
+#endif
 
 void cOglVb::SetShaderAlpha(GLint alpha) {
     Shaders[shader]->SetVector4f("alpha", 1.0f, 1.0f, 1.0f, (GLfloat)(alpha) / 255.0f);
@@ -731,6 +1024,9 @@ cOglCmdRenderFbToBufferFb::cOglCmdRenderFbToBufferFb(cOglFb *fb, cOglFb *buffer,
     this->drawPortX = (GLfloat)drawPortX;
     this->drawPortY = (GLfloat)drawPortY;
     this->transparency = transparency;
+#ifdef USE_GLES2
+    this->bcolor = BORDERCOLOR;
+#endif
 }
 
 bool cOglCmdRenderFbToBufferFb::Execute(void) {
@@ -764,6 +1060,9 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
     VertexBuffers[vbTexture]->ActivateShader();
     VertexBuffers[vbTexture]->SetShaderAlpha(transparency);
     VertexBuffers[vbTexture]->SetShaderProjectionMatrix(buffer->Width(), buffer->Height());
+#ifdef USE_GLES2
+    VertexBuffers[vbTexture]->SetShaderBorderColor(bcolor);
+#endif
 
     buffer->Bind();
     if (!fb->BindTexture())
@@ -780,15 +1079,55 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
 //------------------ cOglCmdCopyBufferToOutputFb --------------------
 cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y) : cOglCmd(fb) {
     this->oFb = oFb;
+#ifdef USE_GLES2
+    this->x = (GLfloat)x;
+    this->y = (GLfloat)y;
+    this->bcolor = BORDERCOLOR;
+#else
     this->x = x;
     this->y = y;
+#endif
 }
 
 bool cOglCmdCopyBufferToOutputFb::Execute(void) {
-    
+#ifdef USE_GLES2
+    GLfloat x2 = fb->Width();
+    GLfloat y2 = fb->Height();
+    GLfloat texX1 = 0.0f;
+    GLfloat texY1 = 1.0f;
+    GLfloat texX2 = 1.0f;
+    GLfloat texY2 = 0.0f;
+
+    GLfloat quadVertices[] = {
+        // Pos    // TexCoords
+        x ,  y ,  texX1, texY2,          //left top
+        x ,  y2,  texX1, texY1,          //left bottom
+        x2,  y2,  texX2, texY1,          //right bottom
+
+        x ,  y ,  texX1, texY2,          //left top
+        x2,  y2,  texX2, texY1,          //right bottom
+        x2,  y ,  texX2, texY2           //right top
+    };
+
+    VertexBuffers[vbTexture]->ActivateShader();
+    VertexBuffers[vbTexture]->SetShaderAlpha(255);
+    VertexBuffers[vbTexture]->SetShaderProjectionMatrix(oFb->Width(), oFb->Height());
+    VertexBuffers[vbTexture]->SetShaderBorderColor(bcolor);
+
+    oFb->BindWrite();
+    if (!fb->BindTexture())
+        return false;
+
+    VertexBuffers[vbTexture]->Bind();
+    VertexBuffers[vbTexture]->SetVertexData(quadVertices);
+    VertexBuffers[vbTexture]->DrawArrays();
+    VertexBuffers[vbTexture]->Unbind();
+    GL_CHECK(glFlush());
+#else
     fb->BindRead();
     oFb->BindWrite();
     fb->Blit(x, y + fb->Height(), x + fb->Width(), y);
+#endif
     oFb->Unbind();
 
     ActivateOsd();
@@ -1178,7 +1517,7 @@ bool cOglCmdDrawText::Execute(void) {
             x2, y1,   1.0, 0.0,     // right top
             x2, y2,   1.0, 1.0      // right bottom     
         };
-    
+
         g->BindTexture();
         VertexBuffers[vbText]->SetVertexData(vertices);
         VertexBuffers[vbText]->DrawArrays();
@@ -1205,6 +1544,9 @@ cOglCmdDrawImage::cOglCmdDrawImage(cOglFb *fb, tColor *argb, GLint width, GLint 
     this->overlay = overlay;
     this->scaleX = scaleX;
     this->scaleY = scaleY;
+#ifdef USE_GLES2
+    this->bcolor = BORDERCOLOR;
+#endif
 }
 
 cOglCmdDrawImage::~cOglCmdDrawImage(void) {
@@ -1218,12 +1560,21 @@ bool cOglCmdDrawImage::Execute(void) {
     GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
+#ifdef USE_GLES2
+        GL_RGBA,
+#else
         GL_RGBA8,
+#endif
         width,
         height,
         0,
+#ifdef USE_GLES2
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+#else
         GL_BGRA,
         GL_UNSIGNED_INT_8_8_8_8_REV,
+#endif
         argb
     ));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
@@ -1250,7 +1601,9 @@ bool cOglCmdDrawImage::Execute(void) {
     VertexBuffers[vbTexture]->ActivateShader();
     VertexBuffers[vbTexture]->SetShaderAlpha(255);
     VertexBuffers[vbTexture]->SetShaderProjectionMatrix(fb->Width(), fb->Height());
-
+#ifdef USE_GLES2
+    VertexBuffers[vbTexture]->SetShaderBorderColor(bcolor);
+#endif
 
     fb->Bind();
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
@@ -1274,6 +1627,7 @@ cOglCmdDrawTexture::cOglCmdDrawTexture(cOglFb *fb, sOglImage *imageRef, GLint x,
     this->imageRef = imageRef;
     this->x = x;
     this->y = y;
+    this->bcolor = BORDERCOLOR;
 }
 
 bool cOglCmdDrawTexture::Execute(void) {
@@ -1296,6 +1650,9 @@ bool cOglCmdDrawTexture::Execute(void) {
     VertexBuffers[vbTexture]->ActivateShader();
     VertexBuffers[vbTexture]->SetShaderAlpha(255);
     VertexBuffers[vbTexture]->SetShaderProjectionMatrix(fb->Width(), fb->Height());
+#ifdef USE_GLES2
+    VertexBuffers[vbTexture]->SetShaderBorderColor(bcolor);
+#endif
 
     fb->Bind();
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, imageRef->texture));
@@ -1325,12 +1682,21 @@ bool cOglCmdStoreImage::Execute(void) {
     GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
+#ifdef USE_GLES2
+        GL_RGBA,
+#else
         GL_RGBA8,
+#endif
         imageRef->width,
         imageRef->height,
         0,
+#ifdef USE_GLES2
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+#else
         GL_BGRA,
         GL_UNSIGNED_INT_8_8_8_8_REV,
+#endif
         data
     ));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
@@ -1513,7 +1879,7 @@ void cOglThread::Action(void) {
         return;
     }
     dsyslog("[softhddev]OpenGL Context initialized");
-    
+
     if (!InitShaders()) {
         esyslog("[softhddev]Could not initiate Shaders");
         Cleanup();
@@ -1521,7 +1887,7 @@ void cOglThread::Action(void) {
         return;
     }
     dsyslog("[softhddev]Shaders initialized");
-    
+
     if (!InitVdpauInterop()) {
         esyslog("[softhddev]: vdpau interop NOT initialized");
         Cleanup();
@@ -1570,6 +1936,40 @@ void cOglThread::Action(void) {
 }
 
 bool cOglThread::InitOpenGL(void) {
+#ifdef USE_GLES2
+    EGLint iMajorVersion, iMinorVersion;
+    EGLConfig config;
+    EGLint numConfig;
+
+    EGL_CHECK(eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY));
+    if (eglDisplay == EGL_NO_DISPLAY)
+        return false;
+
+    EGL_CHECK(eglInitialize(eglDisplay, &iMajorVersion, &iMinorVersion));
+
+    EGL_CHECK(dsyslog("[softhddev]EGL Version: \"%s\"", eglQueryString(eglDisplay, EGL_VERSION)));
+    EGL_CHECK(dsyslog("[softhddev]EGL Vendor: \"%s\"", eglQueryString(eglDisplay, EGL_VENDOR)));
+    EGL_CHECK(dsyslog("[softhddev]EGL Extensions: \"%s\"", eglQueryString(eglDisplay, EGL_EXTENSIONS)));
+    EGL_CHECK(dsyslog("[softhddev]EGL APIs: \"%s\"", eglQueryString(eglDisplay, EGL_CLIENT_APIS)));
+
+    EGL_CHECK(eglChooseConfig(eglDisplay, config_attribute_list, &config, 1, &numConfig));
+    EGL_CHECK(eglContext = eglCreateContext(eglDisplay, config, EGL_NO_CONTEXT, context_attribute_list));
+    if (eglContext == EGL_NO_CONTEXT)
+        return false;
+
+    EGL_CHECK(eglSurface = eglCreatePbufferSurface(eglDisplay, config, NULL));
+    if (eglSurface == EGL_NO_SURFACE)
+        return false;
+
+    eglAcquireContext();
+
+    GL_CHECK(dsyslog("[softhddev]GL Version: \"%s\"", glGetString(GL_VERSION)));
+    GL_CHECK(dsyslog("[softhddev]GL Vendor: \"%s\"", glGetString(GL_VENDOR)));
+    GL_CHECK(dsyslog("[softhddev]GL Extensions: \"%s\"", glGetString(GL_EXTENSIONS)));
+    GL_CHECK(dsyslog("[softhddev]GL Renderer: \"%s\"", glGetString(GL_RENDERER)));
+
+    glesInit();
+#else
     const char *displayName = X11DisplayName;
     if (!displayName) {
         displayName = getenv("DISPLAY");
@@ -1599,6 +1999,7 @@ bool cOglThread::InitOpenGL(void) {
         esyslog("[softhddev]glewInit failed, aborting\n");
         return false;
     }
+#endif
     VertexBuffers[vbText]->EnableBlending();
     GL_CHECK(glDisable(GL_DEPTH_TEST));
     return true;
@@ -1622,10 +2023,17 @@ void cOglThread::DeleteShaders(void) {
 bool cOglThread::InitVdpauInterop(void) {
     void *vdpDevice = GetVDPAUDevice();
     void *procAdress = GetVDPAUProcAdress();
+#ifdef USE_GLES2
+    glGetError(); /* Clear error buffer */
+    eglReleaseContext();
+    GL_CHECK(glVDPAUInitNV(vdpDevice, procAdress, eglContext, eglDisplay));
+    eglAcquireContext();
+#else
     while (glGetError() != GL_NO_ERROR);
     glVDPAUInitNV(vdpDevice, procAdress);
     if (glGetError() != GL_NO_ERROR)
         return false;
+#endif
     return true;
 }
 
@@ -1652,7 +2060,9 @@ void cOglThread::Cleanup(void) {
     DeleteShaders();
     glVDPAUFiniNV();
     cOglFont::Cleanup();
+#ifndef USE_GLES2
     glutExit();
+#endif
 }
 
 /****************************************************************************************

@@ -138,10 +138,18 @@ endif
 
 ifeq ($(OPENGLOSD),1)
 CONFIG += -DUSE_OPENGLOSD
-_CFLAGS += $(shell pkg-config --cflags glew)
-LIBS += $(shell pkg-config --libs glew) -lglut
 _CFLAGS += $(shell pkg-config --cflags freetype2)
 LIBS   += $(shell pkg-config --libs freetype2)
+
+ifeq ($(GLES2),1)
+CONFIG += -DUSE_GLES2
+_CFLAGS += -g
+LIBS += -L/usr/local/lib -lGLESv2 -lEGL
+else
+_CFLAGS += $(shell pkg-config --cflags glew)
+LIBS += $(shell pkg-config --libs glew) -lglut
+endif
+
 endif
 
 _CFLAGS += $(shell pkg-config --cflags libavcodec x11 x11-xcb xcb xcb-icccm)
@@ -157,7 +165,7 @@ DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"' -D_GNU_SOURCE $(CONFIG) \
 ### Make it standard
 
 override CXXFLAGS += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
-    -g -W -Wall -Wextra -Winit-self -Werror=overloaded-virtual -std=c++0x
+    -g -W -Wall -Wextra -Winit-self -Werror=overloaded-virtual -std=c++11
 override CFLAGS	  += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
     -g -W -Wall -Wextra -Winit-self -Wdeclaration-after-statement
 
