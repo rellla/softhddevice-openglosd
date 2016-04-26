@@ -13,6 +13,21 @@ void ConvertColor(const GLint &colARGB, glm::vec4 &col) {
     col.b = ((colARGB & 0x000000FF)      ) / 255.0;
 }
 
+void glCheckError(const char *stmt, const char *fname, int line) {
+    GLint err = glGetError();
+    if (err != GL_NO_ERROR)
+	esyslog("[softhddev]GL Error (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
+}
+
+#ifdef DEBUG_GL
+#define GL_CHECK(stmt) do { \
+    stmt; \
+    glCheckError(#stmt, __FILE__, __LINE__); \
+    } while (0)
+#else
+#define GL_CHECK(stmt) stmt
+#endif
+
 /****************************************************************************************
 * cShader
 ****************************************************************************************/
@@ -118,7 +133,7 @@ void main() \
 static cShader *Shaders[stCount]; 
 
 void cShader::Use(void) {
-    glUseProgram(id);
+    GL_CHECK(glUseProgram(id));
 }
 
 bool cShader::Load(eShaderType type) {
@@ -158,53 +173,53 @@ bool cShader::Load(eShaderType type) {
 }
 
 void cShader::SetFloat(const GLchar *name, GLfloat value) {
-    glUniform1f(glGetUniformLocation(id, name), value);
+    GL_CHECK(glUniform1f(glGetUniformLocation(id, name), value));
 }
 
 void cShader::SetInteger(const GLchar *name, GLint value) {
-    glUniform1i(glGetUniformLocation(id, name), value);
+    GL_CHECK(glUniform1i(glGetUniformLocation(id, name), value));
 }
 
 void cShader::SetVector2f(const GLchar *name, GLfloat x, GLfloat y) {
-    glUniform2f(glGetUniformLocation(id, name), x, y);
+    GL_CHECK(glUniform2f(glGetUniformLocation(id, name), x, y));
 }
 
 void cShader::SetVector3f(const GLchar *name, GLfloat x, GLfloat y, GLfloat z) {
-    glUniform3f(glGetUniformLocation(id, name), x, y, z);
+    GL_CHECK(glUniform3f(glGetUniformLocation(id, name), x, y, z));
 }
 
 void cShader::SetVector4f(const GLchar *name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    glUniform4f(glGetUniformLocation(id, name), x, y, z, w);
+    GL_CHECK(glUniform4f(glGetUniformLocation(id, name), x, y, z, w));
 }
 
 void cShader::SetMatrix4(const GLchar *name, const glm::mat4 &matrix) {
-    glUniformMatrix4fv(glGetUniformLocation(id, name), 1, GL_FALSE, glm::value_ptr(matrix));
+    GL_CHECK(glUniformMatrix4fv(glGetUniformLocation(id, name), 1, GL_FALSE, glm::value_ptr(matrix)));
 }
 
 bool cShader::Compile(const char *vertexCode, const char *fragmentCode) {
     GLuint sVertex, sFragment;
     // Vertex Shader
-    sVertex = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(sVertex, 1, &vertexCode, NULL);
-    glCompileShader(sVertex);
+    GL_CHECK(sVertex = glCreateShader(GL_VERTEX_SHADER));
+    GL_CHECK(glShaderSource(sVertex, 1, &vertexCode, NULL));
+    GL_CHECK(glCompileShader(sVertex));
     if (!CheckCompileErrors(sVertex))
         return false;
     // Fragment Shader
-    sFragment = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(sFragment, 1, &fragmentCode, NULL);
-    glCompileShader(sFragment);
+    GL_CHECK(sFragment = glCreateShader(GL_FRAGMENT_SHADER));
+    GL_CHECK(glShaderSource(sFragment, 1, &fragmentCode, NULL));
+    GL_CHECK(glCompileShader(sFragment));
     if (!CheckCompileErrors(sFragment))
         return false;
     // link Program
-    id = glCreateProgram();
-    glAttachShader(id, sVertex);
-    glAttachShader(id, sFragment);
-    glLinkProgram(id);
+    GL_CHECK(id = glCreateProgram());
+    GL_CHECK(glAttachShader(id, sVertex));
+    GL_CHECK(glAttachShader(id, sFragment));
+    GL_CHECK(glLinkProgram(id));
     if (!CheckCompileErrors(id, true))
         return false;
     // Delete the shaders as they're linked into our program now and no longer necessery
-    glDeleteShader(sVertex);
-    glDeleteShader(sFragment);
+    GL_CHECK(glDeleteShader(sVertex));
+    GL_CHECK(glDeleteShader(sFragment));
     return true;
 }
 
@@ -212,16 +227,16 @@ bool cShader::CheckCompileErrors(GLuint object, bool program) {
     GLint success;
     GLchar infoLog[1024];
     if (!program) {
-        glGetShaderiv(object, GL_COMPILE_STATUS, &success);
+        GL_CHECK(glGetShaderiv(object, GL_COMPILE_STATUS, &success));
         if (!success) {
-            glGetShaderInfoLog(object, 1024, NULL, infoLog);
+            GL_CHECK(glGetShaderInfoLog(object, 1024, NULL, infoLog));
             esyslog("[softhddev]:SHADER: Compile-time error: Type: %d - %s", type, infoLog);
             return false;
         }
     } else {
-        glGetProgramiv(object, GL_LINK_STATUS, &success);
+        GL_CHECK(glGetProgramiv(object, GL_LINK_STATUS, &success));
         if (!success) {
-            glGetProgramInfoLog(object, 1024, NULL, infoLog);
+            GL_CHECK(glGetProgramInfoLog(object, 1024, NULL, infoLog));
             esyslog("[softhddev]:SHADER: Link-time error: Type: %d", type);
             return false;
         }
@@ -260,15 +275,15 @@ void cOglGlyph::SetKerningCache(uint prevSym, int kerning) {
 }
 
 void cOglGlyph::BindTexture(void) {
-    glBindTexture(GL_TEXTURE_2D, texture);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
 }
 
 void cOglGlyph::LoadTexture(FT_BitmapGlyph ftGlyph) {
     // Disable byte-alignment restriction
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(
+    GL_CHECK(glPixelStorei(GL_UNPACK_ALIGNMENT, 1));
+    GL_CHECK(glGenTextures(1, &texture));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
+    GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
         GL_RED,
@@ -278,14 +293,14 @@ void cOglGlyph::LoadTexture(FT_BitmapGlyph ftGlyph) {
         GL_RED,
         GL_UNSIGNED_BYTE,
         ftGlyph->bitmap.buffer
-    );
+    ));
     // Set texture options
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
+    GL_CHECK(glPixelStorei(GL_UNPACK_ALIGNMENT, 4));
 }
 
 
@@ -371,7 +386,7 @@ cOglGlyph* cOglFont::Glyph(uint charCode) const {
     error = FT_Stroker_New( ftLib, &stroker );
     if (error) {
         esyslog("[softhddev]FT_Stroker_New FT_Error (0x%02x) : %s\n", FT_Errors[error].code, FT_Errors[error].message);
-        return NULL;        
+        return NULL;
     }
     float outlineWidth = 0.25f;
     FT_Stroker_Set(stroker,
@@ -384,7 +399,7 @@ cOglGlyph* cOglFont::Glyph(uint charCode) const {
     error = FT_Get_Glyph(face->glyph, &ftGlyph);
     if (error) {
         esyslog("[softhddev]FT_Get_Glyph FT_Error (0x%02x) : %s\n", FT_Errors[error].code, FT_Errors[error].message);
-        return NULL;        
+        return NULL;
     }
 
     error = FT_Glyph_StrokeBorder( &ftGlyph, stroker, 0, 1 );
@@ -397,9 +412,9 @@ cOglGlyph* cOglFont::Glyph(uint charCode) const {
     error = FT_Glyph_To_Bitmap( &ftGlyph, FT_RENDER_MODE_NORMAL, 0, 1);
     if (error) {
         esyslog("[softhddev]FT_Glyph_To_Bitmap FT_Error (0x%02x) : %s\n", FT_Errors[error].code, FT_Errors[error].message);
-        return NULL;        
+        return NULL;
     }
-    
+
     cOglGlyph *Glyph = new cOglGlyph(charCode, (FT_BitmapGlyph)ftGlyph);
     glyphCache.Add(Glyph);
     FT_Done_Glyph(ftGlyph);
@@ -441,25 +456,26 @@ cOglFb::cOglFb(GLint width, GLint height, GLint viewPortWidth, GLint viewPortHei
 }
 
 cOglFb::~cOglFb(void) {
-    glDeleteTextures(1, &texture);
-    glDeleteFramebuffers(1, &fb);
+    GL_CHECK(glDeleteTextures(1, &texture));
+    GL_CHECK(glDeleteFramebuffers(1, &fb));
 }
 
 bool cOglFb::Init(void) {
     initiated = true;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    
-    glGenFramebuffers(1, &fb);
-    glBindFramebuffer(GL_FRAMEBUFFER, fb);
-    
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-    if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    GL_CHECK(glGenTextures(1, &texture));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
+    GL_CHECK(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER));
+    GL_CHECK(glGenFramebuffers(1, &fb));
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+    GL_CHECK(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0));
+
+    GLenum fbstatus;
+    GL_CHECK(fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    if(fbstatus != GL_FRAMEBUFFER_COMPLETE) {
         esyslog("[softhddev]ERROR: Framebuffer is not complete!\n");
         return false;
     }
@@ -469,33 +485,33 @@ bool cOglFb::Init(void) {
 void cOglFb::Bind(void) {
     if (!initiated)
         Init();
-    glViewport(0, 0, width, height);
-    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    GL_CHECK(glViewport(0, 0, width, height));
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
 }
 
 void cOglFb::BindRead(void) {
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
+    GL_CHECK(glBindFramebuffer(GL_READ_FRAMEBUFFER, fb));
 }
 
 void cOglFb::BindWrite(void) {
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb);
+    GL_CHECK(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb));
 }
 
 void cOglFb::Unbind(void) {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);  
-    glBindTexture(GL_TEXTURE_2D, 0);
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
 }
 
 bool cOglFb::BindTexture(void) {
     if (!initiated)
         return false;
-    glBindTexture(GL_TEXTURE_2D, texture);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
     return true;
 }
 
 void cOglFb::Blit(GLint destX1, GLint destY1, GLint destX2, GLint destY2) {
-    glBlitFramebuffer(0, 0, width, height, destX1, destY1, destX2, destY2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glFlush();
+    GL_CHECK(glBlitFramebuffer(0, 0, width, height, destX1, destY1, destX2, destY2, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+    GL_CHECK(glFlush());
 }
 
 /****************************************************************************************
@@ -512,18 +528,21 @@ cOglOutputFb::~cOglOutputFb(void) {
 bool cOglOutputFb::Init(void) {
     //fetching osd vdpau output surface from softhddevice
     void *vdpauOutputSurface = GetVDPAUOutputSurface();
-    glGenTextures(1, &texture);
+    GL_CHECK(glGenTextures(1, &texture));
     //register surface for texture
     surface = glVDPAURegisterOutputSurfaceNV(vdpauOutputSurface, GL_TEXTURE_2D, 1, &texture);
     //set write access to surface
     glVDPAUSurfaceAccessNV(surface, GL_WRITE_DISCARD_NV);
     //create framebuffer
     glVDPAUMapSurfacesNV (1, &surface);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glGenFramebuffers(1, &fb);
-    glBindFramebuffer(GL_FRAMEBUFFER, fb);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-    if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
+    GL_CHECK(glGenFramebuffers(1, &fb));
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
+    GL_CHECK(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0));
+
+    GLenum fbstatus;
+    GL_CHECK(fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    if(fbstatus != GL_FRAMEBUFFER_COMPLETE) {
         esyslog("[softhddev]ERROR::cOglOutputFb: Framebuffer is not complete!");
         return false;
     }
@@ -532,12 +551,12 @@ bool cOglOutputFb::Init(void) {
 
 void cOglOutputFb::BindWrite(void) {
     glVDPAUMapSurfacesNV(1, &surface);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb);
+    GL_CHECK(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb));
 }
 
 void cOglOutputFb::Unbind(void) {
     glVDPAUUnmapSurfacesNV(1, &surface);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, 0));
 }
 
 /****************************************************************************************
@@ -596,32 +615,32 @@ bool cOglVb::Init(void) {
         drawMode = GL_TRIANGLES;
         shader = stText;
     }
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    GL_CHECK(glGenVertexArrays(1, &vao));
+    GL_CHECK(glGenBuffers(1, &vbo));
+    GL_CHECK(glBindVertexArray(vao));
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * numVertices, NULL, GL_DYNAMIC_DRAW);
+    GL_CHECK(glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * numVertices, NULL, GL_DYNAMIC_DRAW));
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, sizeVertex1, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)0);
+    GL_CHECK(glEnableVertexAttribArray(0));
+    GL_CHECK(glVertexAttribPointer(0, sizeVertex1, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)0));
     if (sizeVertex2 > 0) {
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, sizeVertex2, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)(sizeVertex1 * sizeof(GLfloat)));        
+        GL_CHECK(glEnableVertexAttribArray(1));
+        GL_CHECK(glVertexAttribPointer(1, sizeVertex2, GL_FLOAT, GL_FALSE, (sizeVertex1 + sizeVertex2) * sizeof(GLfloat), (GLvoid*)(sizeVertex1 * sizeof(GLfloat))));
     }
-    
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
+    GL_CHECK(glBindVertexArray(0));
 
     return true;
 }
 
 void cOglVb::Bind(void) {
-    glBindVertexArray(vao);
+    GL_CHECK(glBindVertexArray(vao));
 }
 
 void cOglVb::Unbind(void) {
-    glBindVertexArray(0);
+    GL_CHECK(glBindVertexArray(0));
 }
 
 void cOglVb::ActivateShader(void) {
@@ -629,12 +648,12 @@ void cOglVb::ActivateShader(void) {
 }
 
 void cOglVb::EnableBlending(void) {
-    glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    GL_CHECK(glEnable(GL_BLEND));
+    GL_CHECK(glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA));
 }
 
 void cOglVb::DisableBlending(void) {
-    glDisable(GL_BLEND);
+    GL_CHECK(glDisable(GL_BLEND));
 }
 
 void cOglVb::SetShaderColor(GLint color) {
@@ -655,16 +674,16 @@ void cOglVb::SetShaderProjectionMatrix(GLint width, GLint height) {
 void cOglVb::SetVertexData(GLfloat *vertices, int count) {
     if (count == 0)
         count = numVertices;
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * count, vertices);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+    GL_CHECK(glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * count, vertices));
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
 }
 
 void cOglVb::DrawArrays(int count) {
     if (count == 0)
         count = numVertices;
-    glDrawArrays(drawMode, 0, count);
-    glFlush();    
+    GL_CHECK(glDrawArrays(drawMode, 0, count));
+    GL_CHECK(glFlush());
 }
 
 
@@ -785,8 +804,8 @@ bool cOglCmdFill::Execute(void) {
     glm::vec4 col;
     ConvertColor(color, col);
     fb->Bind();
-    glClearColor(col.r, col.g, col.b, col.a);
-    glClear(GL_COLOR_BUFFER_BIT);
+    GL_CHECK(glClearColor(col.r, col.g, col.b, col.a));
+    GL_CHECK(glClear(GL_COLOR_BUFFER_BIT));
     fb->Unbind();
     return true;
 }
@@ -1170,7 +1189,7 @@ bool cOglCmdDrawText::Execute(void) {
             break;
     }
 
-    glBindTexture(GL_TEXTURE_2D, 0);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
     VertexBuffers[vbText]->Unbind();
     fb->Unbind();
     return true;
@@ -1194,9 +1213,9 @@ cOglCmdDrawImage::~cOglCmdDrawImage(void) {
 
 bool cOglCmdDrawImage::Execute(void) {
     GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(
+    GL_CHECK(glGenTextures(1, &texture));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
+    GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
         GL_RGBA8,
@@ -1206,12 +1225,12 @@ bool cOglCmdDrawImage::Execute(void) {
         GL_BGRA,
         GL_UNSIGNED_INT_8_8_8_8_REV,
         argb
-    );
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    ));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
 
     GLfloat x1 = x;          //left
     GLfloat y1 = y;          //top
@@ -1234,7 +1253,7 @@ bool cOglCmdDrawImage::Execute(void) {
 
 
     fb->Bind();
-    glBindTexture(GL_TEXTURE_2D, texture);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, texture));
     if (overlay)
         VertexBuffers[vbTexture]->DisableBlending();
     VertexBuffers[vbTexture]->Bind();
@@ -1244,8 +1263,8 @@ bool cOglCmdDrawImage::Execute(void) {
     if (overlay)
         VertexBuffers[vbTexture]->EnableBlending();
     fb->Unbind();
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDeleteTextures(1, &texture);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
+    GL_CHECK(glDeleteTextures(1, &texture));
 
     return true;
 }
@@ -1279,7 +1298,7 @@ bool cOglCmdDrawTexture::Execute(void) {
     VertexBuffers[vbTexture]->SetShaderProjectionMatrix(fb->Width(), fb->Height());
 
     fb->Bind();
-    glBindTexture(GL_TEXTURE_2D, imageRef->texture);
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, imageRef->texture));
     VertexBuffers[vbTexture]->Bind();
     VertexBuffers[vbTexture]->SetVertexData(quadVertices);
     VertexBuffers[vbTexture]->DrawArrays();
@@ -1301,9 +1320,9 @@ cOglCmdStoreImage::~cOglCmdStoreImage(void) {
 }
 
 bool cOglCmdStoreImage::Execute(void) {
-    glGenTextures(1, &imageRef->texture);
-    glBindTexture(GL_TEXTURE_2D, imageRef->texture);
-    glTexImage2D(
+    GL_CHECK(glGenTextures(1, &imageRef->texture));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, imageRef->texture));
+    GL_CHECK(glTexImage2D(
         GL_TEXTURE_2D,
         0,
         GL_RGBA8,
@@ -1313,12 +1332,12 @@ bool cOglCmdStoreImage::Execute(void) {
         GL_BGRA,
         GL_UNSIGNED_INT_8_8_8_8_REV,
         data
-    );
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    ));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
     return true;
 }
 
@@ -1330,7 +1349,7 @@ cOglCmdDropImage::cOglCmdDropImage(sOglImage *imageRef, cCondWait *wait) : cOglC
 
 bool cOglCmdDropImage::Execute(void) {
     if (imageRef->texture != GL_NONE)
-        glDeleteTextures(1, &imageRef->texture);
+        GL_CHECK(glDeleteTextures(1, &imageRef->texture));
     wait->Signal();
     return true;
 }
@@ -1519,13 +1538,13 @@ void cOglThread::Action(void) {
     }
     dsyslog("[softhddev]Vertex buffers initialized");
 
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    GL_CHECK(glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize));
     dsyslog("[softhddev]Maximum Pixmap size: %dx%dpx", maxTextureSize, maxTextureSize);
 
     //now Thread is ready to do his job
     startWait->Signal();
     stalled = false;
-    
+
     while(Running()) {
 
         if (commands.empty()) {
@@ -1544,7 +1563,7 @@ void cOglThread::Action(void) {
         if (stalled && commands.size() < OGL_CMDQUEUE_SIZE / 2)
             stalled = false;
     }
-   
+
     dsyslog("[softhddev]Cleaning up OpenGL stuff");
     Cleanup();
     dsyslog("[softhddev]OpenGL Worker Thread Ended");
@@ -1581,7 +1600,7 @@ bool cOglThread::InitOpenGL(void) {
         return false;
     }
     VertexBuffers[vbText]->EnableBlending();
-    glDisable(GL_DEPTH_TEST);
+    GL_CHECK(glDisable(GL_DEPTH_TEST));
     return true;
 }
 
@@ -1605,7 +1624,7 @@ bool cOglThread::InitVdpauInterop(void) {
     void *procAdress = GetVDPAUProcAdress();
     while (glGetError() != GL_NO_ERROR);
     glVDPAUInitNV(vdpDevice, procAdress);
-    if (glGetError() != GL_NO_ERROR)        
+    if (glGetError() != GL_NO_ERROR)
         return false;
     return true;
 }

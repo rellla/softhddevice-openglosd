@@ -25,6 +25,7 @@ const struct {
 } FT_Errors[] =
 #include FT_ERRORS_H
 
+#define DEBUG_GL
 
 #include <memory>
 #include <queue>
