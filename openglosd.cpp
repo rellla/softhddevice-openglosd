@@ -678,8 +678,8 @@ bool cOglFb::Init(void) {
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
 #ifdef USE_GLES2
-    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
-    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
 #else
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER));
@@ -1034,9 +1034,15 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
     GLfloat y2 = y + fb->ViewportHeight(); //bottom
 
     GLfloat texX1 = 0.0f;
-    GLfloat texY1 = 0.0f;
     GLfloat texX2 = 1.0f;
+#ifdef USE_GLES2
+    GLfloat texY1 = 0.0f;
     GLfloat texY2 = 1.0f;
+#else
+    /* Do the y-axis flip here */
+    GLfloat texY1 = 1.0f;
+    GLfloat texY2 = 0.0f;
+#endif
 
     if (fb->Scrollable()) {
         GLfloat pageHeight = (GLfloat)fb->ViewportHeight() / (GLfloat)fb->Height();
@@ -1048,13 +1054,13 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
 
     GLfloat quadVertices[] = {
         // Pos    // TexCoords
-        x ,  y ,  texX1, texY2,          //left top
-        x ,  y2,  texX1, texY1,          //left bottom
-        x2,  y2,  texX2, texY1,          //right bottom
+        x ,  y ,  texX1, texY1,          //left top
+        x ,  y2,  texX1, texY2,          //left bottom
+        x2,  y2,  texX2, texY2,          //right bottom
 
-        x ,  y ,  texX1, texY2,          //left top
-        x2,  y2,  texX2, texY1,          //right bottom
-        x2,  y ,  texX2, texY2           //right top
+        x ,  y ,  texX1, texY1,          //left top
+        x2,  y2,  texX2, texY2,          //right bottom
+        x2,  y ,  texX2, texY1           //right top
     };
 
     VertexBuffers[vbTexture]->ActivateShader();
@@ -1081,7 +1087,8 @@ cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputF
     this->oFb = oFb;
 #ifdef USE_GLES2
     this->x = (GLfloat)x;
-    this->y = (GLfloat)y;
+    /* Fix the gles origin and flip the y coordinate */
+    this->y = (GLfloat)oFb->Height() - (GLfloat)y - (GLfloat)fb->Height();
     this->bcolor = BORDERCOLOR;
 #else
     this->x = x;
@@ -1091,22 +1098,24 @@ cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputF
 
 bool cOglCmdCopyBufferToOutputFb::Execute(void) {
 #ifdef USE_GLES2
-    GLfloat x2 = fb->Width();
-    GLfloat y2 = fb->Height();
+    GLfloat x2 = x + (GLfloat)fb->Width();
+    GLfloat y2 = y + (GLfloat)fb->Height();
+
     GLfloat texX1 = 0.0f;
-    GLfloat texY1 = 1.0f;
     GLfloat texX2 = 1.0f;
+    /* Do the y-axis flip here */
+    GLfloat texY1 = 1.0f;
     GLfloat texY2 = 0.0f;
 
     GLfloat quadVertices[] = {
         // Pos    // TexCoords
-        x ,  y ,  texX1, texY2,          //left top
-        x ,  y2,  texX1, texY1,          //left bottom
-        x2,  y2,  texX2, texY1,          //right bottom
+        x ,  y ,  texX1, texY1,          //left top
+        x ,  y2,  texX1, texY2,          //left bottom
+        x2,  y2,  texX2, texY2,          //right bottom
 
-        x ,  y ,  texX1, texY2,          //left top
-        x2,  y2,  texX2, texY1,          //right bottom
-        x2,  y ,  texX2, texY2           //right top
+        x ,  y ,  texX1, texY1,          //left top
+        x2,  y2,  texX2, texY2,          //right bottom
+        x2,  y ,  texX2, texY1           //right top
     };
 
     VertexBuffers[vbTexture]->ActivateShader();
