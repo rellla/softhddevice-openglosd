@@ -81,6 +81,7 @@ static void DumpMpeg(const uint8_t * data, int size);
 //////////////////////////////////////////////////////////////////////////////
 
 extern int ConfigAudioBufferTime;	///< config size ms of audio buffer
+extern char DisableVdpauInterop;	///< disable OpenGL OSD
 extern int ConfigVideoClearOnSwitch;	//<  clear decoder on channel switch
 char ConfigStartX11Server;		///< flag start the x11 server
 static signed char ConfigStartSuspended;	///< flag to start in suspend mode
@@ -2981,6 +2982,8 @@ int ProcessArgs(int argc, char *const argv[])
 		    VideoIgnoreRepeatPict = 1;
 		} else if (!strcasecmp("use-possible-defect-frames", optarg)) {
 		    CodecUsePossibleDefectFrames = 1;
+		} else if (!strcasecmp("disable-vdpau-interop", optarg)) {
+		    DisableVdpauInterop = 1;
 		} else {
 		    fprintf(stderr, _("Workaround '%s' unsupported\n"),
 			optarg);

@@ -151,6 +151,7 @@ static char ConfigAudioCompression;	///< config use volume compression
 static int ConfigAudioMaxCompression;	///< config max volume compression
 static int ConfigAudioStereoDescent;	///< config reduce stereo loudness
 int ConfigAudioBufferTime;		///< config size ms of audio buffer
+char DisableVdpauInterop;
 static int ConfigAudioAutoAES;		///< config automatic AES handling
 
 static char *ConfigX11Display;		///< config x11 display
@@ -688,11 +689,16 @@ void cSoftOsdProvider::DropImageData(int ImageHandle)
 cOsd *cSoftOsdProvider::CreateOsd(int left, int top, uint level)
 {
 #ifdef USE_OPENGLOSD
-    dsyslog("[softhddev]%s: %d, %d, %d, using OpenGL OSD support\n", __FUNCTION__, left, top, level);
-    if (StartOpenGlThread())
-        return Osd = new cOglOsd(left, top, level, oglThread);
-    //return dummy osd if shd is detached
-    return Osd = new cSoftOsd(left, top, 999);
+    if (!DisableVdpauInterop) {
+	dsyslog("[softhddev]%s: %d, %d, %d, using OpenGL OSD support\n", __FUNCTION__, left, top, level);
+	if (StartOpenGlThread())
+    	    return Osd = new cOglOsd(left, top, level, oglThread);
+	//return dummy osd if shd is detached
+	return Osd = new cSoftOsd(left, top, 999);
+    } else {
+	dsyslog("[softhddev]%s: %d, %d, %d, OpenGL OSD support disabled\n", __FUNCTION__, left, top, level);
+	return Osd = new cSoftOsd(left, top, level);
+    }
 #else
     dsyslog("[softhddev]%s: %d, %d, %d\n", __FUNCTION__, left, top, level);
     return Osd = new cSoftOsd(left, top, level);
