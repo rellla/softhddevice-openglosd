@@ -441,8 +441,8 @@ public:
 /******************************************************************************
 * cOglThread
 ******************************************************************************/
-#define OGL_MAX_OSDIMAGES 256
-#define OGL_CMDQUEUE_SIZE 100
+#define OGL_MAX_OSDIMAGES 512
+#define OGL_CMDQUEUE_SIZE 200
 
 class cOglThread : public cThread {
 private:

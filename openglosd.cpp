@@ -792,12 +792,8 @@ bool cOglOutputFb::Init(void) {
 }
 
 void cOglOutputFb::BindWrite(void) {
-#ifdef USE_GLES2
-    eglReleaseContext();
-#endif
     glVDPAUMapSurfacesNV(1, &surface);
 #ifdef USE_GLES2
-    eglAcquireContext();
     GL_CHECK(glViewport(0, 0, width, height));
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
 #else
@@ -807,12 +803,9 @@ void cOglOutputFb::BindWrite(void) {
 
 void cOglOutputFb::Unbind(void) {
 #ifdef USE_GLES2
-    eglReleaseContext();
+    GL_CHECK(glFinish());
 #endif
     glVDPAUUnmapSurfacesNV(1, &surface);
-#ifdef USE_GLES2
-    eglAcquireContext();
-#endif
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, 0));
 }
 
