@@ -76,8 +76,8 @@ LDFLAGS += -L/opt/vc/lib
 _CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter)
 LIBS += -lrt -lmmal -lmmal_core -lbcm_host -lvcos $(shell pkg-config --libs alsa libavcodec libavfilter)
 else
-_CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter libdrm)
-LIBS += $(shell pkg-config --libs alsa libavcodec libavfilter libdrm)
+_CFLAGS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --cflags alsa libavcodec libavfilter libdrm)
+LIBS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --libs alsa libavcodec libavfilter libdrm)
 endif
 
 ### Includes and Defines (add further entries here):
