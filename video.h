@@ -31,6 +31,10 @@
 #include <xf86drmMode.h>
 #include <libavfilter/avfilter.h>
 
+#ifdef USE_GLES
+#include <gbm.h>
+#endif
+
 #include "iatomic.h"
 #include "softhddev.h"
 
@@ -102,6 +106,11 @@ struct _Drm_Render_
 	AVFrame *lastframe;
 	int buffers;
 	int enqueue_buffer;
+
+#ifdef USE_GLES
+	struct gbm_device *gbm_device;
+	struct gbm_surface *gbm_surface;
+#endif
 };
 
     /// Video hardware decoder typedef
@@ -143,6 +152,11 @@ extern void VideoOsdClear(VideoRender *);
     /// Draw an OSD ARGB image.
 extern void VideoOsdDrawARGB(VideoRender *, int, int, int,
 		int, int, const uint8_t *, int, int);
+
+#ifdef USE_GLES
+    /// Activate displaying OSD
+void ActivateOsd(void);
+#endif
 
     /// Set closing flag.
 extern void VideoSetClosing(VideoRender *);

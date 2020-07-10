@@ -55,6 +55,10 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
+#ifdef USE_GLES
+#include <gbm.h>
+#endif
+
 #include "misc.h"
 #include "video.h"
 #include "audio.h"
@@ -63,6 +67,10 @@
 //	Variables
 //----------------------------------------------------------------------------
 int VideoAudioDelay;
+
+#ifdef USE_GLES
+static char OsdShown;
+#endif
 
 static pthread_cond_t PauseCondition;
 static pthread_mutex_t PauseMutex;
@@ -479,6 +487,17 @@ search_mode:
 	drmModeFreeEncoder(encoder);
 	drmModeFreeResources(resources);
 
+#ifdef USE_GLES
+	render->gbm_device = gbm_create_device(render->fd_drm);
+	if (render->gbm_device) {
+		fprintf(stderr, "gbm device created!\n");
+	}
+	else {
+		fprintf(stderr, "failed to create gbm device!\n");
+		abort();
+	}
+#endif
+
 #ifdef DRM_DEBUG
 	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),
 		render->crtc_id, render->video_plane, render->osd_plane, render->use_zpos);
@@ -841,6 +860,12 @@ page_flip:
 	SetPropertyRequest(ModeReq, render->fd_drm, render->video_plane,
 					DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
 
+#ifdef USE_GLES
+	if (OsdShown) {
+		// activate OSD
+	}
+#endif
+
 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
 		fprintf(stderr, "Frame2Display: cannot page flip to FB %i (%d): %m\n",
 			buf->fb_id, errno);
@@ -912,6 +937,16 @@ static void *DisplayHandlerThread(void * arg)
 ///
 void VideoOsdClear(VideoRender * render)
 {
+#ifdef USE_GLES
+	if (render->use_zpos) {
+		ChangePlanes(render, 1);
+	} else {
+		if (drmModeSetPlane(render->fd_drm, render->osd_plane, render->crtc_id, 0, 0,
+			0, 0, render->buf_osd.width, render->buf_osd.height, 0, 0, 0 << 16, 0 << 16))
+				fprintf(stderr, "VideoOsdClear: failed to clear plane: (%d): %m\n", (errno));
+		render->buf_osd.x = 0;
+	}
+#else
 	if (render->use_zpos) {
 		ChangePlanes(render, 1);
 		memset((void *)render->buf_osd.plane[0], 0,
@@ -922,6 +957,11 @@ void VideoOsdClear(VideoRender * render)
 				fprintf(stderr, "VideoOsdClear: failed to clear plane: (%d): %m\n", (errno));
 		render->buf_osd.x = 0;
 	}
+#endif
+
+#ifdef USE_GLES
+	OsdShown = 0;
+#endif
 }
 
 ///
@@ -937,10 +977,17 @@ void VideoOsdClear(VideoRender * render)
 ///	@param y	y-coordinate on screen of argb image
 ///
 void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
+#ifdef USE_GLES
+		__attribute__ ((unused)) int yi, int width, int height, __attribute__ ((unused)) int pitch,
+		__attribute__ ((unused)) const uint8_t * argb, int x, int y)
+#else
 		__attribute__ ((unused)) int yi, int width, int height, int pitch,
 		const uint8_t * argb, int x, int y)
+#endif
 {
+#ifndef USE_GLES
 	int i;
+#endif
 
 	if (render->use_zpos) {
 		ChangePlanes(render, 0);
@@ -954,13 +1001,21 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		}
 	}
 
+#ifndef USE_GLES
 	for (i = 0; i < height; ++i) {
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.x) * 4 + (i + y - render->buf_osd.y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
 //	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 //	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
+#endif
 }
+
+#ifdef USE_GLES
+void ActivateOsd(void) {
+	OsdShown = 1;
+}
+#endif
 
 //----------------------------------------------------------------------------
 //	Thread

@@ -13,8 +13,14 @@ PLUGIN = softhddevice-drm
 
 	# enable this for MMAL (RaspberryPi)
 MMAL ?= 0
+	# enable this for GLES OSD
+GLES ?= 1
 
 CONFIG += -DDEBUG 				# enable debug output+functions
+ifeq ($(GLES),1)
+CONFIG += -DUSE_GLES
+#CONFIG += -DWRITE_PNG
+endif
 #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
 #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
 #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
@@ -76,9 +82,19 @@ LDFLAGS += -L/opt/vc/lib
 _CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter)
 LIBS += -lrt -lmmal -lmmal_core -lbcm_host -lvcos $(shell pkg-config --libs alsa libavcodec libavfilter)
 else
+INCLUDES += -I/opt/prefix/include
+LDFLAGS += -L/opt/prefix/lib/arm-linux-gnueabihf
 _CFLAGS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --cflags alsa libavcodec libavfilter libdrm)
 LIBS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --libs alsa libavcodec libavfilter libdrm)
 endif
+
+ifeq ($(GLES),1)
+_CFLAGS += $(shell PKG_CONFIG_PATH="/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --cflags gbm glesv2 egl)
+LIBS += $(shell PKG_CONFIG_PATH="/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --libs gbm glesv2 egl)
+_CFLAGS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --cflags freetype2)
+LIBS += $(shell PKG_CONFIG_PATH="$$PKG_CONFIG_PATH:/opt/prefix/lib/arm-linux-gnueabihf/pkgconfig:/opt/prefix/lib/pkgconfig" pkg-config --libs freetype2)
+endif
+
 
 ### Includes and Defines (add further entries here):
 
@@ -100,6 +116,10 @@ ifeq ($(MMAL),1)
 OBJS = $(PLUGIN).o mediaplayer.o softhddev.o video_mmal.o audio.o codec.o ringbuffer.o
 else
 OBJS = $(PLUGIN).o mediaplayer.o softhddev.o video_drm.o audio.o codec.o ringbuffer.o
+endif
+
+ifeq ($(GLES),1)
+OBJS += openglosd.o
 endif
 
 SRCS = $(wildcard $(OBJS:.o=.c)) $(PLUGIN).cpp
