@@ -36,6 +36,10 @@ using std::ifstream;
 #include "softhddevice_service.h"
 #include "mediaplayer.h"
 
+#ifdef USE_GLES
+#include "openglosd.h"
+#endif
+
 extern "C"
 {
 #include <libavcodec/avcodec.h>
@@ -363,11 +367,20 @@ void cSoftOsd::Flush(void)
 */
 cOsd *cSoftOsdProvider::CreateOsd(int left, int top, uint level)
 {
+#ifdef USE_GLES
+#ifdef OSD_DEBUG
+    dsyslog("[softhddev] OSD %s: %d, %d, %d, using OpenGL OSD support\n", __FUNCTION__, left, top, level);
+#endif
+    if (StartOpenGlThread())
+        return Osd = new cOglOsd(left, top, level, oglThread);
+    return Osd = new cSoftOsd(left, top, 999);
+#else
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s: %d, %d, %d\n", __FUNCTION__, left, top, level);
 #endif
 
     return Osd = new cSoftOsd(left, top, level);
+#endif
 }
 
 /**
@@ -380,6 +393,48 @@ bool cSoftOsdProvider::ProvidesTrueColor(void)
     return true;
 }
 
+#ifdef USE_GLES
+const cImage *cSoftOsdProvider::GetImageData(int ImageHandle) {
+    return cOsdProvider::GetImageData(ImageHandle);
+}
+
+void cSoftOsdProvider::OsdSizeChanged(void) {
+    // cleanup OpenGL context
+    cSoftOsdProvider::StopOpenGlThread();
+    cSoftOsdProvider::UpdateOsdSize();
+}
+
+bool cSoftOsdProvider::StartOpenGlThread(void) {
+    if (oglThread.get()) {
+        if (oglThread->Active()) {
+            return true;
+        }
+        oglThread.reset();
+    }
+    cCondWait wait;
+    dsyslog("[softhddev]Trying to start openGL worker thread\n");
+    oglThread.reset(new cOglThread(&wait, ConfigMaxSizeGPUImageCache));
+    wait.Wait();
+
+    if (oglThread->Active()) {
+        dsyslog("[softhddev]openGL Thread successfully started\n");
+        return true;
+    }
+
+    dsyslog("[softhddev]openGL Thread NOT started\n");
+    return false;
+}
+
+void cSoftOsdProvider::StopOpenGlThread(void) {
+    dsyslog("[softhddev]stopping openGL worker thread\n");
+    if (oglThread) {
+        oglThread->Stop();
+    }
+    oglThread.reset();
+    dsyslog("[softhddev]openGL worker thread stopped\n");
+}
+#endif
+
 /**
 **	Create cOsdProvider class.
 */
@@ -389,15 +444,23 @@ cSoftOsdProvider::cSoftOsdProvider(void)
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s:\n", __FUNCTION__);
 #endif
+#ifdef USE_GLES
+    StopOpenGlThread();
+#endif
 }
 
 /**
 **	Destroy cOsdProvider class.
+*/
 cSoftOsdProvider::~cSoftOsdProvider()
 {
+#ifdef OSD_DEBUG
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
+#endif
+#ifdef USE_GLES
+    StopOpenGlThread();
+#endif
 }
-*/
 
 //////////////////////////////////////////////////////////////////////////////
 //	cMenuSetupPage
@@ -460,6 +523,9 @@ void cMenuSetupSoft::Create(void)
 	//
 	//	osd
 	//
+#ifdef USE_GLES
+	Add(new cMenuEditIntItem(tr("GPU mem used for image caching (MB)"), &MaxSizeGPUImageCache, 0, 4000));
+#endif
     }
     //
     //	audio
@@ -617,6 +683,10 @@ cMenuSetupSoft::cMenuSetupSoft(void)
 		AudioEqBand[i] = SetupAudioEqBand[i];
 	}
 
+#ifdef USE_GLES
+    MaxSizeGPUImageCache = ConfigMaxSizeGPUImageCache;
+#endif
+
     Create();
 }
 
@@ -684,6 +754,9 @@ void cMenuSetupSoft::Store(void)
 	SetupStore("AudioEqBand17b", SetupAudioEqBand[16] = AudioEqBand[16]);
 	SetupStore("AudioEqBand18b", SetupAudioEqBand[17] = AudioEqBand[17]);
     AudioSetEq(SetupAudioEqBand, ConfigAudioEq);
+#ifdef USE_GLES
+    SetupStore("MaxSizeGPUImageCache", ConfigMaxSizeGPUImageCache = MaxSizeGPUImageCache);
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1372,6 +1445,12 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	AudioSetEq(SetupAudioEqBand, ConfigAudioEq);
 	return true;
     }
+#ifdef USE_GLES
+    if (!strcasecmp(name, "MaxSizeGPUImageCache")) {
+	ConfigMaxSizeGPUImageCache = atoi(value);
+	return true;
+    }
+#endif
     return false;
 }
 

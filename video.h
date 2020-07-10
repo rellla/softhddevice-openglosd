@@ -31,6 +31,13 @@
 #include <xf86drmMode.h>
 #include <libavfilter/avfilter.h>
 
+#ifdef USE_GLES
+#include <gbm.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <EGL/eglplatform.h>
+#endif
+
 #include "iatomic.h"
 #include "softhddev.h"
 
@@ -54,6 +61,9 @@ struct drm_buf {
 	uint32_t pix_fmt;
 	int fd_prime;
 	AVFrame *frame;
+#ifdef USE_GLES
+	struct gbm_bo *bo;
+#endif
 };
 
 struct _Drm_Render_
@@ -95,6 +105,9 @@ struct _Drm_Render_
 	struct drm_buf *act_buf;
 	struct drm_buf bufs[36];
 	struct drm_buf buf_osd;
+#ifdef USE_GLES
+	struct drm_buf *buf_osd_gl;
+#endif
 	struct drm_buf buf_black;
 	int use_zpos;
 	uint64_t zpos_overlay;
@@ -104,6 +117,17 @@ struct _Drm_Render_
 	int buffers;
 	int enqueue_buffer;
 	int OsdShown;
+
+#ifdef USE_GLES
+	struct gbm_device *gbm_device;
+	struct gbm_surface *gbm_surface;
+	EGLSurface eglSurface;
+	EGLDisplay eglDisplay;
+	EGLContext eglContext;
+	struct gbm_bo *bo;
+	struct gbm_bo *old_bo;
+	struct gbm_bo *next_bo;
+#endif
 };
 
     /// Video hardware decoder typedef
