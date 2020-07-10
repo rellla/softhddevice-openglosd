@@ -40,6 +40,9 @@
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
 
+#ifdef USE_GLES
+#include <assert.h>
+#endif
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -54,6 +57,11 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
+
+#ifdef USE_GLES
+#include <gbm.h>
+#include "gles_private.h"
+#endif
 
 #include "misc.h"
 #include "video.h"
@@ -327,6 +335,49 @@ static int TestCaps(int fd)
 	return 0;
 }
 
+#ifdef USE_GLES
+static const EGLint context_attribute_list[] =
+{
+    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_NONE
+};
+
+EGLConfig get_config(void)
+{
+    VideoRender *render = (VideoRender *)GetVideoRender();
+    if (!render) {
+        fprintf(stderr, "failed to get VideoRender\n");
+        abort();
+    }
+
+    EGLint config_attribute_list[] = {
+        EGL_BUFFER_SIZE, 32,
+        EGL_STENCIL_SIZE, EGL_DONT_CARE,
+        EGL_DEPTH_SIZE, EGL_DONT_CARE,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_NONE
+    };
+    EGLConfig configs;
+    EGLint num_configs;
+    EGL_CHECK(assert(eglChooseConfig(render->eglDisplay, config_attribute_list, &configs, 1, &num_configs) == EGL_TRUE));
+
+    for (int i = 0; i < num_configs; ++i) {
+        EGLint gbm_format;
+        EGL_CHECK(assert(eglGetConfigAttrib(render->eglDisplay, configs, EGL_NATIVE_VISUAL_ID, &gbm_format) == EGL_TRUE));
+
+        if (gbm_format == GBM_FORMAT_ARGB8888)
+            return configs;
+    }
+
+    fprintf(stderr, "no matching gbm config found\n");
+    abort();
+}
+
+PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = NULL;
+PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = NULL;
+#endif
+
 static int FindDevice(VideoRender * render)
 {
 	drmModeRes *resources;
@@ -496,6 +547,54 @@ search_mode:
 	drmModeFreeEncoder(encoder);
 	drmModeFreeResources(resources);
 
+#ifdef USE_GLES
+	render->gbm_device = gbm_create_device(render->fd_drm);
+	if (render->gbm_device) {
+		fprintf(stderr, "gbm device created!\n");
+	}
+	else {
+		fprintf(stderr, "failed to create gbm device!\n");
+		return -1;
+	}
+
+	int w, h;
+	double pixel_aspect;
+	GetScreenSize(&w, &h, &pixel_aspect);
+
+	render->gbm_surface = gbm_surface_create(render->gbm_device, w, h, DRM_FORMAT_ARGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	if (!render->gbm_surface) {
+		fprintf(stderr, "initGBM: failed to create %d x %d surface bo\n", w, h);
+		return -1;
+	}
+	fprintf(stderr, "render->gbm_surface %p created\n", render->gbm_surface);
+
+	EGLint iMajorVersion, iMinorVersion;
+
+	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	assert(get_platform_display != NULL);
+	PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT");
+	assert(get_platform_surface != NULL);
+
+	EGL_CHECK(assert((render->eglDisplay = get_platform_display(EGL_PLATFORM_GBM_MESA, render->gbm_device, NULL)) != EGL_NO_DISPLAY));
+	EGL_CHECK(assert(eglInitialize(render->eglDisplay, &iMajorVersion, &iMinorVersion) == EGL_TRUE));
+
+	EGLConfig eglConfig = get_config();
+
+	EGL_CHECK(assert(eglBindAPI(EGL_OPENGL_ES_API) == EGL_TRUE));
+	EGL_CHECK(assert((render->eglContext = eglCreateContext(render->eglDisplay, eglConfig, EGL_NO_CONTEXT, context_attribute_list)) != EGL_NO_CONTEXT));
+
+	EGL_CHECK(assert((render->eglSurface = get_platform_surface(render->eglDisplay, eglConfig, render->gbm_surface, NULL)) != EGL_NO_SURFACE));
+
+	EGLint s_width, s_height;
+	EGL_CHECK(assert(eglQuerySurface(render->eglDisplay, render->eglSurface, EGL_WIDTH, &s_width) == EGL_TRUE));
+	EGL_CHECK(assert(eglQuerySurface(render->eglDisplay, render->eglSurface, EGL_HEIGHT, &s_height) == EGL_TRUE));
+
+	if (render->eglSurface != EGL_NO_SURFACE)
+		fprintf(stderr, "EGLSurface %p on EGLDisplay %p for %d x %d BO created\n", render->eglSurface, render->eglDisplay, s_width, s_height);
+
+	eglReleaseContext();
+#endif
+
 #ifdef DRM_DEBUG
 	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),
 		render->crtc_id, render->video_plane, render->osd_plane, render->use_zpos);
@@ -504,6 +603,59 @@ search_mode:
 #endif
 	return 0;
 }
+
+#ifdef USE_GLES
+static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+{
+	int drm_fd = gbm_device_get_fd(gbm_bo_get_device(bo));
+	struct drm_buf *buf = data;
+
+	if (buf->fb_id)
+		drmModeRmFB(drm_fd, buf->fb_id);
+
+	free(buf);
+}
+
+struct drm_buf *drm_get_buf_from_bo(VideoRender *render, struct gbm_bo *bo)
+{
+	struct drm_buf *buf = gbm_bo_get_user_data(bo);
+	uint64_t modifier[4] = { 0, 0, 0, 0 };
+	uint32_t mod_flags = 0;
+
+	if (buf) {
+		fprintf(stderr, "SetupFB GL buffer already done! %d x %d pix_fmt %4.4s fb_id %d\n",
+			buf->width, buf->height, (char *)&buf->pix_fmt, buf->fb_id);
+		return buf;
+	}
+
+	buf = calloc(1, sizeof *buf);
+	buf->bo = bo;
+
+	buf->width = gbm_bo_get_width(bo);
+	buf->height = gbm_bo_get_height(bo);
+	buf->pix_fmt = gbm_bo_get_format(bo);
+	buf->handle[0] = gbm_bo_get_handle_for_plane(bo, 0).u32;
+	buf->pitch[0] = gbm_bo_get_stride_for_plane(bo, 0);
+	buf->offset[0] = 0;
+
+	modifier[0] = gbm_bo_get_modifier(bo);
+	if (modifier[0])
+		mod_flags = DRM_MODE_FB_MODIFIERS;
+
+	// Add FB
+	if (drmModeAddFB2WithModifiers(render->fd_drm, buf->width, buf->height, buf->pix_fmt,
+			buf->handle, buf->pitch, buf->offset, modifier, &buf->fb_id, mod_flags)) {
+
+		fprintf(stderr, "SetupFB: cannot create modifiers framebuffer (%d): %m\n", errno);
+		Fatal(_("SetupFB: cannot create modifiers framebuffer (%d): %m\n"), errno);
+	}
+
+	fprintf(stderr, "SetupFB New GL buffer %d x %d pix_fmt %4.4s fb_id %d\n",
+		buf->width, buf->height, (char *)&buf->pix_fmt, buf->fb_id);
+	gbm_bo_set_user_data(bo, buf, drm_fb_destroy_callback);
+	return buf;
+}
+#endif
 
 static int SetupFB(VideoRender * render, struct drm_buf *buf,
 			AVDRMFrameDescriptor *primedata)
@@ -863,19 +1015,41 @@ page_flip:
 		if (render->use_zpos) {
 			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 			SetChangePlanes(render, ModeReq, 0);
+#ifdef USE_GLES
+		// Do we have to do the initial SetPlane() here?
+#endif
 		} else {
+#ifdef USE_GLES
+			if (render->buf_osd_gl) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+			}
+#else
 			SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 				 render->buf_osd.draw_x, render->buf_osd.draw_y, render->buf_osd.draw_width, render->buf_osd.draw_height,
 				 0, 0, render->buf_osd.draw_width, render->buf_osd.draw_height);
+#endif
 		}
 	} else {
 		if (render->use_zpos) {
 			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 			SetChangePlanes(render, ModeReq, 1);
+#ifdef USE_GLES
+		// Do we have to do the initial SetPlane() here?
+#endif
 		} else {
+#ifdef USE_GLES
+			if (render->buf_osd_gl) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, 0, 0);
+			}
+#else
 			SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 				 0, 0, render->buf_osd.width, render->buf_osd.height,
 				 0, 0, 0, 0);
+#endif
 		}
 	}
 
@@ -950,8 +1124,10 @@ static void *DisplayHandlerThread(void * arg)
 ///
 void VideoOsdClear(VideoRender * render)
 {
+#ifndef USE_GLES
 	memset((void *)render->buf_osd.plane[0], 0,
 		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
+#endif
 
 	render->OsdShown = 0;
 }
@@ -968,10 +1144,70 @@ void VideoOsdClear(VideoRender * render)
 ///	@param x	x-coordinate on screen of argb image
 ///	@param y	y-coordinate on screen of argb image
 ///
+#ifdef USE_GLES
+void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
+		__attribute__ ((unused)) int yi, __attribute__ ((unused)) int width, __attribute__ ((unused)) int height, __attribute__ ((unused)) int pitch,
+		__attribute__ ((unused)) const uint8_t * argb, __attribute__ ((unused)) int x, __attribute__ ((unused)) int y)
+#else
 void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		__attribute__ ((unused)) int yi, int width, int height, int pitch,
 		const uint8_t * argb, int x, int y)
+#endif
 {
+#ifdef USE_GLES
+	struct drm_buf *buf;
+
+	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
+	fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
+
+	render->next_bo = gbm_surface_lock_front_buffer(render->gbm_surface);
+	assert(render->next_bo);
+
+	buf = drm_get_buf_from_bo(render, render->next_bo);
+	if (!buf) {
+		fprintf(stderr, "Failed to get GL buffer\n");
+		return;
+	}
+
+	render->buf_osd_gl = buf;
+
+#ifdef WRITE_PNG
+	uint32_t stride;
+	void *map_data;
+	void *result = gbm_bo_map(render->next_bo, 0, 0, width, height, GBM_BO_TRANSFER_READ, &stride, &map_data);
+
+	if (!result) {
+		fprintf(stderr, "couldn't map BO\n");
+		return;
+	}
+
+	assert(stride == (uint32_t)(width * 4));
+
+/* raw copy to osd plane
+	for (int i = 0; i < height; ++i) {
+		memcpy(render->buf_osd.plane[0] + i * stride, result + i * stride, (size_t)stride);
+	}
+*/
+
+	static int scr_nr = 0;
+	char filename[18];
+	snprintf(filename, sizeof(filename), "screenshot%03d.png", scr_nr++);
+
+	assert(!writeImage(filename, width, height, (GLubyte *)result, "test_osd"));
+
+	if (result)
+		gbm_bo_unmap(render->next_bo, map_data);
+#endif
+	// release old buffer for writing again
+	if (render->bo)
+		gbm_surface_release_buffer(render->gbm_surface, render->bo);
+
+	// rotate bos and create and keep bo as old_bo to make it free'able
+	render->old_bo = render->bo;
+	render->bo = render->next_bo;
+
+	fprintf(stderr, "GLDrmOsdDrawARGB width: %i height: %i pitch: %i\n", buf->width, buf->height, buf->pitch[0]);
+#else
 	int i;
 
 	if (!render->use_zpos) {
@@ -986,9 +1222,11 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
 
-	render->OsdShown = 1;
 //	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 //	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
+#endif
+
+	render->OsdShown = 1;
 }
 
 //----------------------------------------------------------------------------
@@ -1709,6 +1947,7 @@ void VideoInit(VideoRender * render)
 	render->bufs[0].pix_fmt = render->bufs[1].pix_fmt = DRM_FORMAT_NV12;
 
 	// osd FB
+#ifndef USE_GLES
 	render->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
 	render->buf_osd.width = render->mode.hdisplay;
 	render->buf_osd.height = render->mode.vdisplay;
@@ -1716,6 +1955,7 @@ void VideoInit(VideoRender * render)
 		fprintf(stderr, "VideoOsdInit: SetupFB FB OSD failed\n");
 		Fatal(_("VideoOsdInit: SetupFB FB OSD failed!\n"));
 	}
+#endif
 
 	// black fb
 	render->buf_black.pix_fmt = DRM_FORMAT_NV12;
@@ -1763,8 +2003,12 @@ void VideoInit(VideoRender * render)
 
 	if (render->use_zpos) {
 		// Primary plane
+#ifndef USE_GLES
 		SetPlaneSrc(render, ModeReq, prime_plane, 0, 0, render->buf_osd.width, render->buf_osd.height);
 		SetPlaneFbId(render, ModeReq, prime_plane, render->buf_osd.fb_id);
+#else
+		// We don't have the buf_osd_gl yet, so we can't set anything
+#endif
 		// Black Buffer
 		SetPlaneCrtc(render, ModeReq, overlay_plane, 0, 0, render->mode.hdisplay, render->mode.vdisplay);
 		SetPlaneCrtcId(render, ModeReq, overlay_plane, render->crtc_id);
@@ -1804,7 +2048,16 @@ void VideoExit(VideoRender * render)
 		}
 
 		DestroyFB(render->fd_drm, &render->buf_black);
+#ifdef USE_GLES
+		if (render->next_bo)
+			gbm_bo_destroy(render->next_bo);
+
+		if (render->old_bo)
+			gbm_bo_destroy(render->old_bo);
+#else
 		DestroyFB(render->fd_drm, &render->buf_osd);
+#endif
+
 		close(render->fd_drm);
 	}
 }
