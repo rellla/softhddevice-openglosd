@@ -999,6 +999,7 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
 
 	bo = next_bo;
 #endif
+    OsdDrawARGB(0, 0, oFb->Width(), oFb->Height(), 0, 0, 0, 0);
 
     fprintf(stderr, "copy-to-output finished\n");
 

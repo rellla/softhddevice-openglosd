@@ -1059,16 +1059,19 @@ void VideoOsdClear(VideoRender * render)
 void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 #ifdef USE_GLES
 		__attribute__ ((unused)) int yi, int width, int height, __attribute__ ((unused)) int pitch,
-		__attribute__ ((unused)) const uint8_t * argb, int x, int y)
+		__attribute__ ((unused)) const uint8_t * argb, __attribute__ ((unused)) int x, __attribute__ ((unused)) int y)
 #else
 		__attribute__ ((unused)) int yi, int width, int height, int pitch,
 		const uint8_t * argb, int x, int y)
 #endif
 {
-#ifndef USE_GLES
+#ifdef USE_GLES
+	static struct gbm_bo *bo;
+	static struct gbm_bo *next_bo;
+#else
 	int i;
 #endif
-
+/*
 	if (render->use_zpos) {
 		ChangePlanes(render, 0);
 	} else {
@@ -1080,8 +1083,41 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 			render->buf_osd.y = y;
 		}
 	}
+*/
+#ifdef USE_GLES
+	if (!render->gbm_surface) {
+		fprintf(stderr, "failed to get gbm_surface\n");
+		return;
+	}
 
-#ifndef USE_GLES
+	next_bo = gbm_surface_lock_front_buffer(render->gbm_surface);
+	assert(next_bo);
+
+	uint32_t stride;
+	void *map_data;
+	void *result = gbm_bo_map(next_bo, 0, 0, width, height, GBM_BO_TRANSFER_READ, &stride, &map_data);
+
+	if (!result) {
+		fprintf(stderr, "couldn't map BO\n");
+		return;
+	}
+
+	assert(stride == (uint32_t)(width * 4));
+
+	for (int i = 0; i < height; ++i) {
+		memcpy(render->buf_osd.plane[0] + i * stride, result + i * stride, (size_t)stride);
+	}
+
+	if (bo) {
+		gbm_bo_unmap(bo, map_data);
+		gbm_surface_release_buffer(render->gbm_surface, bo);
+	}
+
+	bo = next_bo;
+
+	fprintf(stderr, "GLDrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
+	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
+#else
 	for (i = 0; i < height; ++i) {
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.x) * 4 + (i + y - render->buf_osd.y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
