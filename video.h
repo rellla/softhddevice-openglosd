@@ -33,6 +33,9 @@
 
 #ifdef USE_GLES
 #include <gbm.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <EGL/eglplatform.h>
 #endif
 
 #include "iatomic.h"
@@ -110,6 +113,9 @@ struct _Drm_Render_
 #ifdef USE_GLES
 	struct gbm_device *gbm_device;
 	struct gbm_surface *gbm_surface;
+	EGLSurface eglSurface;
+	EGLDisplay eglDisplay;
+	EGLContext eglContext;
 #endif
 };
 

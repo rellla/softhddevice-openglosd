@@ -38,6 +38,30 @@ struct gbm {
     int dma_buf_fd;
 };
 
+void eglCheckError(const char *stmt, const char *fname, int line);
+void glCheckError(const char *stmt, const char *fname, int line);
+void eglAquireContext(void);
+void eglReleaseContext(void);
+
+#ifdef GL_DEBUG
+#define GL_CHECK(stmt) do { \
+    stmt; \
+    glCheckError(#stmt, __FILE__, __LINE__); \
+    } while (0)
+#else
+#define GL_CHECK(stmt) stmt
+#endif
+
+#ifdef GL_DEBUG
+#define EGL_CHECK(stmt) do { \
+    stmt; \
+    eglCheckError(#stmt, __FILE__, __LINE__); \
+    } while (0)
+#else
+#define EGL_CHECK(stmt) stmt
+#endif
+
+
 #ifdef __cplusplus
 }
 #endif

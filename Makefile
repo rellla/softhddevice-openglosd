@@ -19,6 +19,7 @@ GLES ?= 1
 CONFIG += -DDEBUG 				# enable debug output+functions
 ifeq ($(GLES),1)
 CONFIG += -DUSE_GLES
+CONFIG += -DGL_DEBUG
 #CONFIG += -DWRITE_PNG
 endif
 #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC

@@ -14,18 +14,6 @@
 /* This is needed for the GLES2 GL_CLAMP_TO_BORDER workaround */
 #define BORDERCOLOR 0x88888888
 
-/* Global EGL variables */
-static struct gbm gbm;
-EGLSurface eglSurface = EGL_NO_SURFACE;
-EGLContext eglContext = EGL_NO_CONTEXT;
-EGLDisplay eglDisplay = EGL_NO_DISPLAY;
-
-static const EGLint context_attribute_list[] =
-{
-    EGL_CONTEXT_CLIENT_VERSION, 2,
-    EGL_NONE
-};
-
 /****************************************************************************************
 * Helpers
 ****************************************************************************************/
@@ -119,38 +107,32 @@ void glCheckError(const char *stmt, const char *fname, int line) {
         esyslog("[softhddev]GL Error (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
 }
 
-#ifdef DEBUG_GL
-#define GL_CHECK(stmt) do { \
-    stmt; \
-    glCheckError(#stmt, __FILE__, __LINE__); \
-    } while (0)
-#else
-#define GL_CHECK(stmt) stmt
-#endif
-
 void eglCheckError(const char *stmt, const char *fname, int line) {
     EGLint err = eglGetError();
     if (err != EGL_SUCCESS)
         esyslog("[softhddev]EGL ERROR (0x%08x): %s failed at %s:%i\n", err, stmt, fname, line);
 }
 
-#ifdef DEBUG_GL
-#define EGL_CHECK(stmt) do { \
-    stmt; \
-    eglCheckError(#stmt, __FILE__, __LINE__); \
-    } while (0)
-#else
-#define EGL_CHECK(stmt) stmt
-#endif
-
 void eglAcquireContext()
 {
-    EGL_CHECK(assert(eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext) == EGL_TRUE));
+    VideoRender *render = (VideoRender *)GetVideoRender();
+    if (!render) {
+        fprintf(stderr, "failed to get VideoRender\n");
+        abort();
+    }
+
+    EGL_CHECK(assert(eglMakeCurrent(render->eglDisplay, render->eglSurface, render->eglSurface, render->eglContext) == EGL_TRUE));
 }
 
 void eglReleaseContext()
 {
-    EGL_CHECK(assert(eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) == EGL_TRUE));
+    VideoRender *render = (VideoRender *)GetVideoRender();
+    if (!render) {
+        fprintf(stderr, "failed to get VideoRender\n");
+        abort();
+    }
+
+    EGL_CHECK(assert(eglMakeCurrent(render->eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) == EGL_TRUE));
 }
 
 /****************************************************************************************
@@ -941,8 +923,11 @@ cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputF
 }
 
 bool cOglCmdCopyBufferToOutputFb::Execute(void) {
-    static gbm_bo *bo;
-    static gbm_bo *next_bo;
+    VideoRender *render = (VideoRender *)GetVideoRender();
+    if (!render) {
+        fprintf(stderr, "failed to get VideoRender\n");
+        abort();
+    }
 
     GLfloat x2 = x + (GLfloat)fb->Width();
     GLfloat y2 = y + (GLfloat)fb->Height();
@@ -977,17 +962,10 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
     GL_CHECK(glFinish());
-    EGL_CHECK(eglSwapBuffers(eglDisplay, eglSurface));
-    fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", eglDisplay, eglSurface);
+    EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
+    fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
 
 #ifdef WRITE_PNG
-	VideoRender *render;
-
-	render = (VideoRender *)GetVideoRender();
-	if (!render) {
-		fprintf(stderr, "failed to get VideoRender\n");
-		return false;
-	}
 	if (!render->gbm_surface) {
 		fprintf(stderr, "failed to get gbm_surface\n");
 		return false;
@@ -1811,94 +1789,19 @@ void cOglThread::Action(void) {
     dsyslog("[softhddev]OpenGL Worker Thread Ended");
 }
 
-EGLConfig get_config(void)
-{
-
-    EGLint config_attribute_list[] = {
-        EGL_BUFFER_SIZE, 32,
-        EGL_STENCIL_SIZE, EGL_DONT_CARE,
-        EGL_DEPTH_SIZE, EGL_DONT_CARE,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_NONE
-    };
-    EGLConfig configs;
-    EGLint num_configs;
-    EGL_CHECK(assert(eglChooseConfig(eglDisplay, config_attribute_list, &configs, 1, &num_configs) == EGL_TRUE));
-
-    for (int i = 0; i < num_configs; ++i) {
-        EGLint gbm_format;
-        EGL_CHECK(assert(eglGetConfigAttrib(eglDisplay, configs, EGL_NATIVE_VISUAL_ID, &gbm_format) == EGL_TRUE));
-
-        if (gbm_format == GBM_FORMAT_ARGB8888)
-            return configs;
-    }
-
-    fprintf(stderr, "no matching gbm config found\n");
-    abort();
-}
-
-PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = NULL;
-PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = NULL;
-
 bool cOglThread::InitOpenGL(void) {
-    VideoRender *render;
-
-    render = (VideoRender *)GetVideoRender();
+    VideoRender *render = (VideoRender *)GetVideoRender();
     if (!render) {
         fprintf(stderr, "failed to get VideoRender\n");
-        return false;
+        abort();
     }
-
-    gbm.dev = render->gbm_device;
-
-    int w, h;
-    double pixel_aspect;
-    GetScreenSize(&w, &h, &pixel_aspect);
-    gbm.width = w;
-    gbm.height = h;
-    gbm.format = DRM_FORMAT_ARGB8888;
-    gbm.surface = NULL;
-    gbm.flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
-
-    gbm.surface = gbm_surface_create(gbm.dev, gbm.width, gbm.height, gbm.format, gbm.flags);
-    if (!gbm.surface) {
-        fprintf(stderr, "initGBM: failed to create %d x %d surface bo\n", gbm.width, gbm.height);
-        return false;
-    }
-    render->gbm_surface = gbm.surface;
-    fprintf(stderr, "render->gbm_surface %p created\n", render->gbm_surface);
-
-    EGLint iMajorVersion, iMinorVersion;
-
-    PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
-    assert(get_platform_display != NULL);
-    PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT");
-    assert(get_platform_surface != NULL);
-
-    EGL_CHECK(assert((eglDisplay = get_platform_display(EGL_PLATFORM_GBM_MESA, gbm.dev, NULL)) != EGL_NO_DISPLAY));
-    EGL_CHECK(assert(eglInitialize(eglDisplay, &iMajorVersion, &iMinorVersion) == EGL_TRUE));
-
-    EGLConfig eglConfig = get_config();
-
-    EGL_CHECK(assert(eglBindAPI(EGL_OPENGL_ES_API) == EGL_TRUE));
-    EGL_CHECK(assert((eglContext = eglCreateContext(eglDisplay, eglConfig, EGL_NO_CONTEXT, context_attribute_list)) != EGL_NO_CONTEXT));
-
-    EGL_CHECK(assert((eglSurface = get_platform_surface(eglDisplay, eglConfig, gbm.surface, NULL)) != EGL_NO_SURFACE));
-
-    EGLint s_width, s_height;
-    EGL_CHECK(assert(eglQuerySurface(eglDisplay, eglSurface, EGL_WIDTH, &s_width) == EGL_TRUE));
-    EGL_CHECK(assert(eglQuerySurface(eglDisplay, eglSurface, EGL_HEIGHT, &s_height) == EGL_TRUE));
-
-    if (eglSurface != EGL_NO_SURFACE)
-        fprintf(stderr, "EGLSurface %p on EGLDisplay %p for %d x %d BO created\n", eglSurface, eglDisplay, s_width, s_height);
 
     eglAcquireContext(); /* eglMakeCurrent with new eglSurface */
 
-    EGL_CHECK(dsyslog("[softhddev]EGL Version: \"%s\"", eglQueryString(eglDisplay, EGL_VERSION)));
-    EGL_CHECK(dsyslog("[softhddev]EGL Vendor: \"%s\"", eglQueryString(eglDisplay, EGL_VENDOR)));
-    EGL_CHECK(dsyslog("[softhddev]EGL Extensions: \"%s\"", eglQueryString(eglDisplay, EGL_EXTENSIONS)));
-    EGL_CHECK(dsyslog("[softhddev]EGL APIs: \"%s\"", eglQueryString(eglDisplay, EGL_CLIENT_APIS)));
+    EGL_CHECK(dsyslog("[softhddev]EGL Version: \"%s\"", eglQueryString(render->eglDisplay, EGL_VERSION)));
+    EGL_CHECK(dsyslog("[softhddev]EGL Vendor: \"%s\"", eglQueryString(render->eglDisplay, EGL_VENDOR)));
+    EGL_CHECK(dsyslog("[softhddev]EGL Extensions: \"%s\"", eglQueryString(render->eglDisplay, EGL_EXTENSIONS)));
+    EGL_CHECK(dsyslog("[softhddev]EGL APIs: \"%s\"", eglQueryString(render->eglDisplay, EGL_CLIENT_APIS)));
 
     GL_CHECK(dsyslog("[softhddev]GL Version: \"%s\"", glGetString(GL_VERSION)));
     GL_CHECK(dsyslog("[softhddev]GL Vendor: \"%s\"", glGetString(GL_VENDOR)));

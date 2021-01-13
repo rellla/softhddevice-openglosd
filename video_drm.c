@@ -40,6 +40,7 @@
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
 
+#include <assert.h>
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -57,6 +58,7 @@
 
 #ifdef USE_GLES
 #include <gbm.h>
+#include "gles_private.h"
 #endif
 
 #include "misc.h"
@@ -318,6 +320,49 @@ static int TestCaps(int fd)
 	return 0;
 }
 
+#ifdef USE_GLES
+static const EGLint context_attribute_list[] =
+{
+    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_NONE
+};
+
+EGLConfig get_config(void)
+{
+    VideoRender *render = (VideoRender *)GetVideoRender();
+    if (!render) {
+        fprintf(stderr, "failed to get VideoRender\n");
+        abort();
+    }
+
+    EGLint config_attribute_list[] = {
+        EGL_BUFFER_SIZE, 32,
+        EGL_STENCIL_SIZE, EGL_DONT_CARE,
+        EGL_DEPTH_SIZE, EGL_DONT_CARE,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_NONE
+    };
+    EGLConfig configs;
+    EGLint num_configs;
+    EGL_CHECK(assert(eglChooseConfig(render->eglDisplay, config_attribute_list, &configs, 1, &num_configs) == EGL_TRUE));
+
+    for (int i = 0; i < num_configs; ++i) {
+        EGLint gbm_format;
+        EGL_CHECK(assert(eglGetConfigAttrib(render->eglDisplay, configs, EGL_NATIVE_VISUAL_ID, &gbm_format) == EGL_TRUE));
+
+        if (gbm_format == GBM_FORMAT_ARGB8888)
+            return configs;
+    }
+
+    fprintf(stderr, "no matching gbm config found\n");
+    abort();
+}
+
+PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = NULL;
+PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = NULL;
+#endif
+
 static int FindDevice(VideoRender * render)
 {
 	drmModeRes *resources;
@@ -494,8 +539,43 @@ search_mode:
 	}
 	else {
 		fprintf(stderr, "failed to create gbm device!\n");
-		abort();
+		return -1;
 	}
+
+	int w, h;
+	double pixel_aspect;
+	GetScreenSize(&w, &h, &pixel_aspect);
+
+	render->gbm_surface = gbm_surface_create(render->gbm_device, w, h, DRM_FORMAT_ARGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	if (!render->gbm_surface) {
+		fprintf(stderr, "initGBM: failed to create %d x %d surface bo\n", w, h);
+		return -1;
+	}
+	fprintf(stderr, "render->gbm_surface %p created\n", render->gbm_surface);
+
+	EGLint iMajorVersion, iMinorVersion;
+
+	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	assert(get_platform_display != NULL);
+	PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC get_platform_surface = (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT");
+	assert(get_platform_surface != NULL);
+
+	EGL_CHECK(assert((render->eglDisplay = get_platform_display(EGL_PLATFORM_GBM_MESA, render->gbm_device, NULL)) != EGL_NO_DISPLAY));
+	EGL_CHECK(assert(eglInitialize(render->eglDisplay, &iMajorVersion, &iMinorVersion) == EGL_TRUE));
+
+	EGLConfig eglConfig = get_config();
+
+	EGL_CHECK(assert(eglBindAPI(EGL_OPENGL_ES_API) == EGL_TRUE));
+	EGL_CHECK(assert((render->eglContext = eglCreateContext(render->eglDisplay, eglConfig, EGL_NO_CONTEXT, context_attribute_list)) != EGL_NO_CONTEXT));
+
+	EGL_CHECK(assert((render->eglSurface = get_platform_surface(render->eglDisplay, eglConfig, render->gbm_surface, NULL)) != EGL_NO_SURFACE));
+
+	EGLint s_width, s_height;
+	EGL_CHECK(assert(eglQuerySurface(render->eglDisplay, render->eglSurface, EGL_WIDTH, &s_width) == EGL_TRUE));
+	EGL_CHECK(assert(eglQuerySurface(render->eglDisplay, render->eglSurface, EGL_HEIGHT, &s_height) == EGL_TRUE));
+
+	if (render->eglSurface != EGL_NO_SURFACE)
+		fprintf(stderr, "EGLSurface %p on EGLDisplay %p for %d x %d BO created\n", render->eglSurface, render->eglDisplay, s_width, s_height);
 #endif
 
 #ifdef DRM_DEBUG
