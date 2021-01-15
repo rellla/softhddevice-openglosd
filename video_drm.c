@@ -1068,23 +1068,7 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 #ifdef USE_GLES
 	static struct gbm_bo *bo;
 	static struct gbm_bo *next_bo;
-#else
-	int i;
-#endif
-/*
-	if (render->use_zpos) {
-		ChangePlanes(render, 0);
-	} else {
-		if (render->buf_osd.x == 0){
-			if (drmModeSetPlane(render->fd_drm, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
-				0, x, y, width, height, 0, 0, width << 16, height << 16))
-					fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n", (errno));
-			render->buf_osd.x = x;
-			render->buf_osd.y = y;
-		}
-	}
-*/
-#ifdef USE_GLES
+
 	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
 	fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
 
@@ -1129,6 +1113,20 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	fprintf(stderr, "GLDrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
 #else
+	int i;
+
+	if (render->use_zpos) {
+		ChangePlanes(render, 0);
+	} else {
+		if (render->buf_osd.x == 0){
+			if (drmModeSetPlane(render->fd_drm, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
+				0, x, y, width, height, 0, 0, width << 16, height << 16))
+					fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n", (errno));
+			render->buf_osd.x = x;
+			render->buf_osd.y = y;
+		}
+	}
+
 	for (i = 0; i < height; ++i) {
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.x) * 4 + (i + y - render->buf_osd.y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
