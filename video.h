@@ -60,6 +60,10 @@ struct drm_buf {
 	uint32_t pix_fmt;
 	int fd_prime;
 	AVFrame *frame;
+#ifdef USE_GLES
+	int has_gl;
+	struct gbm_bo *bo;
+#endif
 };
 
 struct _Drm_Render_
@@ -101,6 +105,7 @@ struct _Drm_Render_
 	struct drm_buf *act_buf;
 	struct drm_buf bufs[36];
 	struct drm_buf buf_osd;
+	struct drm_buf *buf_osd_gl;
 	struct drm_buf buf_black;
 	int use_zpos;
 	uint64_t zpos_overlay;
@@ -116,6 +121,9 @@ struct _Drm_Render_
 	EGLSurface eglSurface;
 	EGLDisplay eglDisplay;
 	EGLContext eglContext;
+	struct gbm_bo *bo;
+	struct gbm_bo *old_bo;
+	struct gbm_bo *next_bo;
 #endif
 };
 
