@@ -42,6 +42,9 @@ void eglCheckError(const char *stmt, const char *fname, int line);
 void glCheckError(const char *stmt, const char *fname, int line);
 void eglAquireContext(void);
 void eglReleaseContext(void);
+#ifdef WRITE_PNG
+int writeImage(char* filename, int width, int height, void *buffer, char* title);
+#endif
 
 #ifdef GL_DEBUG
 #define GL_CHECK(stmt) do { \

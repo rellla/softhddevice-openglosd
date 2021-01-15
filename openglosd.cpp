@@ -962,46 +962,9 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
     GL_CHECK(glFinish());
-    EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
-    fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
 
-#ifdef WRITE_PNG
-	if (!render->gbm_surface) {
-		fprintf(stderr, "failed to get gbm_surface\n");
-		return false;
-	}
-	next_bo = gbm_surface_lock_front_buffer(render->gbm_surface);
-	assert(next_bo);
-	fprintf(stderr, "lock gbm_surface %p\n", render->gbm_surface);
-
-	uint32_t stride;
-	void *map_data;
-	fprintf(stderr, "w %d h %d\n", (uint32_t)oFb->Width(), (uint32_t)oFb->Height());
-	void *result = gbm_bo_map(next_bo, 0, 0, (uint32_t)oFb->Width(), (uint32_t)oFb->Height(),
-				     GBM_BO_TRANSFER_READ, &stride, &map_data);
-	if (!result)
-		fprintf(stderr, "result == NULL %d\n", errno);
-	assert(result);
-	assert(stride == (uint32_t)(oFb->Width()) * 4);
-
-	if (result) {
-		static int scr_nr = 0;
-		char filename[18];
-		snprintf(filename, sizeof(filename), "screenshot%03d.png", scr_nr++);
-
-		assert(!writeImage(filename, oFb->Width(), oFb->Height(), (GLubyte *)result, "test_osd"));
-	}
-
-	if (bo) {
-		gbm_bo_unmap(bo, map_data);
-		gbm_surface_release_buffer(render->gbm_surface, bo);
-	}
-
-	bo = next_bo;
-#endif
+    // eglSwapBuffers and gbm_surface_locl_front_buffer in OsdDrawARGB()
     OsdDrawARGB(0, 0, oFb->Width(), oFb->Height(), 0, 0, 0, 0);
-
-    fprintf(stderr, "copy-to-output finished\n");
 
     ActivateOsd();
     return true;

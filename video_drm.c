@@ -1085,6 +1085,9 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	}
 */
 #ifdef USE_GLES
+	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
+	fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
+
 	if (!render->gbm_surface) {
 		fprintf(stderr, "failed to get gbm_surface\n");
 		return;
@@ -1107,6 +1110,14 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	for (int i = 0; i < height; ++i) {
 		memcpy(render->buf_osd.plane[0] + i * stride, result + i * stride, (size_t)stride);
 	}
+
+#ifdef WRITE_PNG
+	static int scr_nr = 0;
+	char filename[18];
+	snprintf(filename, sizeof(filename), "screenshot%03d.png", scr_nr++);
+
+	assert(!writeImage(filename, oFb->Width(), oFb->Height(), (GLubyte *)result, "test_osd"));
+#endif
 
 	if (bo) {
 		gbm_bo_unmap(bo, map_data);
