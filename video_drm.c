@@ -576,12 +576,15 @@ search_mode:
 	assert(get_platform_surface != NULL);
 
 	EGL_CHECK(assert((render->eglDisplay = get_platform_display(EGL_PLATFORM_GBM_MESA, render->gbm_device, NULL)) != EGL_NO_DISPLAY));
+	fprintf(stderr, "EGLDisplay %p created\n", render->eglDisplay);
 	EGL_CHECK(assert(eglInitialize(render->eglDisplay, &iMajorVersion, &iMinorVersion) == EGL_TRUE));
+	fprintf(stderr, "EGLDisplay initialized\n");
 
 	EGLConfig eglConfig = get_config();
 
 	EGL_CHECK(assert(eglBindAPI(EGL_OPENGL_ES_API) == EGL_TRUE));
 	EGL_CHECK(assert((render->eglContext = eglCreateContext(render->eglDisplay, eglConfig, EGL_NO_CONTEXT, context_attribute_list)) != EGL_NO_CONTEXT));
+	fprintf(stderr, "EGLContext %p created\n", render->eglContext);
 
 	EGL_CHECK(assert((render->eglSurface = get_platform_surface(render->eglDisplay, eglConfig, render->gbm_surface, NULL)) != EGL_NO_SURFACE));
 
@@ -591,8 +594,6 @@ search_mode:
 
 	if (render->eglSurface != EGL_NO_SURFACE)
 		fprintf(stderr, "EGLSurface %p on EGLDisplay %p for %d x %d BO created\n", render->eglSurface, render->eglDisplay, s_width, s_height);
-
-	eglReleaseContext();
 #endif
 
 #ifdef DRM_DEBUG
@@ -1013,11 +1014,16 @@ page_flip:
 	// handle the osd plane
 	if (render->OsdShown) {
 		if (render->use_zpos) {
+#ifdef USE_GLES
+			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+				render->buf_osd_gl->init = 1;
+			}
+#endif
 			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 			SetChangePlanes(render, ModeReq, 0);
-#ifdef USE_GLES
-		// Do we have to do the initial SetPlane() here?
-#endif
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl) {
@@ -1033,11 +1039,16 @@ page_flip:
 		}
 	} else {
 		if (render->use_zpos) {
+#ifdef USE_GLES
+			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+				render->buf_osd_gl->init = 1;
+			}
+#endif
 			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 			SetChangePlanes(render, ModeReq, 1);
-#ifdef USE_GLES
-		// Do we have to do the initial SetPlane() here?
-#endif
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl) {
