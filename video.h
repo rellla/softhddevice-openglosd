@@ -63,6 +63,7 @@ struct drm_buf {
 	AVFrame *frame;
 #ifdef USE_GLES
 	struct gbm_bo *bo;
+	int init;
 #endif
 };
 

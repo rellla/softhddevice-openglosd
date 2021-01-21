@@ -1759,6 +1759,12 @@ bool cOglThread::InitOpenGL(void) {
         abort();
     }
 
+    fprintf(stderr, "InitOpenGL\n");
+    // We have to wait for the EGL Context to be created
+    // Should be solved with a mutex
+    // HACK:
+    // sleep(2);
+
     eglAcquireContext(); /* eglMakeCurrent with new eglSurface */
 
     EGL_CHECK(dsyslog("[softhddev]EGL Version: \"%s\"", eglQueryString(render->eglDisplay, EGL_VERSION)));
