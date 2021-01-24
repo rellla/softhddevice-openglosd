@@ -2066,6 +2066,9 @@ cOglOsd::cOglOsd(int Left, int Top, uint Level, std::shared_ptr<cOglThread> oglT
 }
 
 cOglOsd::~cOglOsd() {
+    if (!oglThread->Active())
+        return;
+    oglThread->DoCmd(new cOglCmdFill(bFb, clrTransparent));
     OsdClose();
     SetActive(false);
     oglThread->DoCmd(new cOglCmdDeleteFb(bFb));

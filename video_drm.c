@@ -223,6 +223,8 @@ void SetPlane(VideoRender * render, drmModeAtomicReqPtr ModeReq, uint32_t plane_
 	SetPlaneFbId(render, ModeReq, plane_id, fb_id);
 	SetPlaneCrtc(render, ModeReq, plane_id, crtc_x, crtc_y, crtc_w, crtc_h);
 	SetPlaneSrc(render, ModeReq, plane_id, src_x, src_y, src_w, src_h);
+	fprintf(stderr, "SetPlane %d on %d, (%d, %d, %d, %d)<-(%d, %d, %d, %d)\n",
+		plane_id, fb_id, crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
 }
 
 ///
@@ -1022,8 +1024,11 @@ page_flip:
 				render->buf_osd_gl->init = 1;
 			}
 #endif
-			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-			SetChangePlanes(render, ModeReq, 0);
+			if (render->buf_osd.dirty) {
+				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+				SetChangePlanes(render, ModeReq, 0);
+				render->buf_osd.dirty = 0;
+			}
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl) {
@@ -1032,23 +1037,29 @@ page_flip:
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
 			}
 #else
-			SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
-				 render->buf_osd.draw_x, render->buf_osd.draw_y, render->buf_osd.draw_width, render->buf_osd.draw_height,
-				 0, 0, render->buf_osd.draw_width, render->buf_osd.draw_height);
+			if (render->buf_osd.dirty) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
+					 render->buf_osd.draw_x, render->buf_osd.draw_y, render->buf_osd.draw_width, render->buf_osd.draw_height,
+					 0, 0, render->buf_osd.draw_width, render->buf_osd.draw_height);
+				render->buf_osd.dirty = 0;
+			}
 #endif
 		}
 	} else {
 		if (render->use_zpos) {
 #ifdef USE_GLES
-			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
-				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
-					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
-					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
-				render->buf_osd_gl->init = 1;
-			}
+//			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
+//				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+//					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+//					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+//				render->buf_osd_gl->init = 1;
+//			}
 #endif
-			flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-			SetChangePlanes(render, ModeReq, 1);
+			if (render->buf_osd.dirty) {
+				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+				SetChangePlanes(render, ModeReq, 1);
+				render->buf_osd.dirty = 0;
+			}
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl) {
@@ -1057,9 +1068,12 @@ page_flip:
 					 0, 0, 0, 0);
 			}
 #else
-			SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
-				 0, 0, render->buf_osd.width, render->buf_osd.height,
-				 0, 0, 0, 0);
+			if (render->buf_osd.dirty) {
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
+					 0, 0, render->buf_osd.width, render->buf_osd.height,
+					 0, 0, 0, 0);
+				render->buf_osd.dirty = 0;
+			}
 #endif
 		}
 	}
@@ -1138,6 +1152,7 @@ void VideoOsdClear(VideoRender * render)
 #ifndef USE_GLES
 	memset((void *)render->buf_osd.plane[0], 0,
 		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
+	render->buf_osd.dirty = 1;
 #endif
 
 	render->OsdShown = 0;
@@ -1232,6 +1247,7 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.draw_x) * 4 + (i + y - render->buf_osd.draw_y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
+
 
 //	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 //	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
