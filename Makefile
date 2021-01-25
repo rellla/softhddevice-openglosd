@@ -14,7 +14,7 @@ PLUGIN = softhddevice-drm
 	# enable this for MMAL (RaspberryPi)
 MMAL ?= 0
 	# enable this for GLES OSD
-GLES ?= 0
+GLES ?= 1
 
 CONFIG += -DDEBUG 				# enable debug output+functions
 ifeq ($(GLES),1)

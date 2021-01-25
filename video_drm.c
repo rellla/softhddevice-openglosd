@@ -223,7 +223,7 @@ void SetPlane(VideoRender * render, drmModeAtomicReqPtr ModeReq, uint32_t plane_
 	SetPlaneFbId(render, ModeReq, plane_id, fb_id);
 	SetPlaneCrtc(render, ModeReq, plane_id, crtc_x, crtc_y, crtc_w, crtc_h);
 	SetPlaneSrc(render, ModeReq, plane_id, src_x, src_y, src_w, src_h);
-	fprintf(stderr, "SetPlane %d on %d, (%d, %d, %d, %d)<-(%d, %d, %d, %d)\n",
+	fprintf(stderr, "SetPlane %d on %lld, (%lld, %lld, %lld, %lld)<-(%lld, %lld, %lld, %lld)\n",
 		plane_id, fb_id, crtc_x, crtc_y, crtc_w, crtc_h, src_x, src_y, src_w, src_h);
 }
 
@@ -305,6 +305,9 @@ void ReadHWPlatform(VideoRender * render)
 			render->NoHwDeint = 1;
 			break;
 		}
+
+		// HACK
+		render->NoHwDeint = 1;
 
 		read_size -= (strlen(read_ptr) + 1);
 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
@@ -1017,11 +1020,17 @@ page_flip:
 	if (render->OsdShown) {
 		if (render->use_zpos) {
 #ifdef USE_GLES
-			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
-				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
-					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
-					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
-				render->buf_osd_gl->init = 1;
+			if (render->buf_osd_gl && (!render->buf_osd_gl->init || render->buf_osd_gl->dirty)) {
+				if (!render->buf_osd_gl->init) {
+					fprintf(stderr, "init 1\n");
+					SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+					render->buf_osd_gl->init = 1;
+				}
+				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+				SetChangePlanes(render, ModeReq, 0);
+				render->buf_osd_gl->dirty = 0;
 			}
 #endif
 			if (render->buf_osd.dirty) {
@@ -1031,13 +1040,16 @@ page_flip:
 			}
 		} else {
 #ifdef USE_GLES
-			if (render->buf_osd_gl) {
+			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
+				fprintf(stderr, "init 2\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+				render->buf_osd_gl->dirty = 0;
 			}
 #else
 			if (render->buf_osd.dirty) {
+				fprintf(stderr, "init 3\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 					 render->buf_osd.draw_x, render->buf_osd.draw_y, render->buf_osd.draw_width, render->buf_osd.draw_height,
 					 0, 0, render->buf_osd.draw_width, render->buf_osd.draw_height);
@@ -1048,12 +1060,18 @@ page_flip:
 	} else {
 		if (render->use_zpos) {
 #ifdef USE_GLES
-//			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
-//				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
-//					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
-//					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
-//				render->buf_osd_gl->init = 1;
-//			}
+			if (render->buf_osd_gl && (!render->buf_osd_gl->init || render->buf_osd_gl->dirty)) {
+				if (!render->buf_osd_gl->init) {
+					fprintf(stderr, "init 4\n");
+					SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+					render->buf_osd_gl->init = 1;
+				}
+				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+				SetChangePlanes(render, ModeReq, 1);
+				render->buf_osd_gl->dirty = 0;
+			}
 #endif
 			if (render->buf_osd.dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
@@ -1062,13 +1080,16 @@ page_flip:
 			}
 		} else {
 #ifdef USE_GLES
-			if (render->buf_osd_gl) {
+			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
+				fprintf(stderr, "init 5\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
 					 0, 0, 0, 0);
+				render->buf_osd_gl->dirty = 0;
 			}
 #else
 			if (render->buf_osd.dirty) {
+				fprintf(stderr, "init 6\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 					 0, 0, render->buf_osd.width, render->buf_osd.height,
 					 0, 0, 0, 0);
