@@ -138,9 +138,11 @@ private:
         float tx;
         float ty;
     } c[128];
+    int height;
 public:
     cOglFontAtlas(FT_Face face, int height);
     virtual ~cOglFontAtlas(void);
+    int Height(void) const { return height; }
 };
 
 class cOglFont : public cListObject {
@@ -156,10 +158,11 @@ private:
     mutable cList<cOglGlyph> glyphCache;
     cOglFont(const char *fontName, int charHeight);
     static void Init(void);
-    cOglFontAtlas *Atlas;
+    cOglFontAtlas *atlas;
 public:
     virtual ~cOglFont(void);
     static cOglFont *Get(const char *name, int charHeight);
+    cOglFontAtlas *Atlas(void) { return atlas; };
     static void Cleanup(void);
     const char *Name(void) { return *name; };
     int Size(void) { return size; };
@@ -342,7 +345,7 @@ private:
 public:
     cOglCmdBufferFill(cOglFb *fb, GLint color);
     virtual ~cOglCmdBufferFill(void) {};
-    virtual const char* Description(void) { return "Fill Buffer"; }
+    virtual const char* Description(void) { return "Fill Buffer  "; }
     virtual bool Execute(void);
 };
 
@@ -370,7 +373,7 @@ private:
 public:
     cOglCmdDrawEllipse(cOglFb *fb, GLint x, GLint y, GLint width, GLint height, GLint color, GLint quadrants);
     virtual ~cOglCmdDrawEllipse(void) {};
-    virtual const char* Description(void) { return "DrawEllipse"; }
+    virtual const char* Description(void) { return "DrawEllipse  "; }
     virtual bool Execute(void);
 };
 
@@ -383,7 +386,7 @@ private:
 public:
     cOglCmdDrawSlope(cOglFb *fb, GLint x, GLint y, GLint width, GLint height, GLint color, GLint type);
     virtual ~cOglCmdDrawSlope(void) {};
-    virtual const char* Description(void) { return "DrawSlope"; }
+    virtual const char* Description(void) { return "DrawSlope    "; }
     virtual bool Execute(void);
 };
 
@@ -398,7 +401,7 @@ private:
 public:
     cOglCmdDrawText(cOglFb *fb, GLint x, GLint y, unsigned int *symbols, GLint limitX, const char *name, int fontSize, tColor colorText);
     virtual ~cOglCmdDrawText(void);
-    virtual const char* Description(void) { return "DrawText"; }
+    virtual const char* Description(void) { return "DrawText     "; }
     virtual bool Execute(void);
 };
 

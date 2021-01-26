@@ -526,7 +526,7 @@ search_mode:
 						if (!render->video_plane) {
 							if (type != DRM_PLANE_TYPE_PRIMARY) {
 								render->use_zpos = 1;
-								zpos = 0;
+//								zpos = 0;
 								render->zpos_overlay = zpos;
 								fprintf(stderr, " VIDEO on OVERLAY zpos %lld (=render->zpos_overlay)", zpos);
 							}
@@ -538,7 +538,7 @@ search_mode:
 					case DRM_FORMAT_ARGB8888:
 						if (!render->osd_plane) {
 							if (type != DRM_PLANE_TYPE_OVERLAY) {
-								zpos = 1;
+//								zpos = 1;
 								render->zpos_primary = zpos;
 								fprintf(stderr, " OSD on PRIMARY zpos %lld (=render->zpos_primary)", zpos);
 							}
@@ -1201,6 +1201,8 @@ void VideoOsdClear(VideoRender * render)
 	}
 
 	render->buf_osd_gl = buf;
+	render->buf_osd_gl->dirty = 1;
+
 	// release old buffer for writing again
 	if (render->bo)
 		gbm_surface_release_buffer(render->gbm_surface, render->bo);
@@ -1253,6 +1255,8 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	}
 
 	render->buf_osd_gl = buf;
+	render->buf_osd_gl->dirty = 1;
+
 	// release old buffer for writing again
 	if (render->bo)
 		gbm_surface_release_buffer(render->gbm_surface, render->bo);
@@ -1276,6 +1280,8 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.draw_x) * 4 + (i + y - render->buf_osd.draw_y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
+
+	render->buf_osd.dirty = 1;
 
 //	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 //	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);

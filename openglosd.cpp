@@ -432,6 +432,8 @@ bool cOglFont::initiated = false;
 
 #define MAX_ATLAS_WIDTH 1024
 cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
+    this->height = height;
+
     FT_Set_Pixel_Sizes(face, 0, height);
     FT_GlyphSlot g = face->glyph;
 
@@ -559,7 +561,7 @@ cOglFont::cOglFont(const char *fontName, int charHeight) : name(fontName) {
     FT_Set_Char_Size(face, 0, charHeight * 64, 0, 0);
     height = (face->size->metrics.ascender - face->size->metrics.descender + 63) / 64;
     bottom = abs((face->size->metrics.descender - 63) / 64);
-    this->Atlas = new cOglFontAtlas(face, charHeight);
+    this->atlas = new cOglFontAtlas(face, charHeight);
     fprintf(stderr, "Created new font: %s (%d) height: %d, bottom: %d - %d chars (%d - %d)\n", fontName, charHeight, height, bottom, count, min_index, max_index);
 }
 
@@ -1461,6 +1463,9 @@ bool cOglCmdDrawText::Execute(void) {
     if (!f)
         return false;
 
+    cOglFontAtlas *fa = f->Atlas();
+    fprintf(stderr, "DrawText, Loaded Atlas height %d\n", fa->Height());
+
     VertexBuffers[vbText]->ActivateShader();
     VertexBuffers[vbText]->SetShaderColor(colorText);
     VertexBuffers[vbText]->SetShaderProjectionMatrix(fb->Width(), fb->Height());
@@ -1474,6 +1479,48 @@ bool cOglCmdDrawText::Execute(void) {
     FT_ULong sym = 0;
     FT_ULong prevSym = 0;
     int kerning = 0;
+
+/*
+    for (int i = 0; symbols[i]; i++) {
+        sym = symbols[i];
+        cOglGlyph *g = f->Glyph(sym);
+        if (!g) {
+            esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
+        }
+
+        if ( limitX && xGlyph + g->AdvanceX() > limitX )
+            break;
+
+        kerning = f->Kerning(g, prevSym);
+        prevSym = sym;
+
+        GLfloat x1 = xGlyph + kerning + g->BearingLeft();          //left
+        GLfloat y1 = y + (fontHeight - bottom - g->BearingTop());  //top
+        GLfloat x2 = x1 + g->Width();                              //right
+        GLfloat y2 = y1 + g->Height();                             //bottom
+
+        GLfloat vertices[] = {
+            x1, y2,   0.0, 1.0,     // left bottom
+            x1, y1,   0.0, 0.0,     // left top
+            x2, y1,   1.0, 0.0,     // right top
+
+            x1, y2,   0.0, 1.0,     // left bottom
+            x2, y1,   1.0, 0.0,     // right top
+            x2, y2,   1.0, 1.0      // right bottom     
+        };
+
+
+        xGlyph += kerning + g->AdvanceX();
+
+        if ( xGlyph > fb->Width() - 1 )
+            break;
+
+    }
+
+    g->BindTexture();
+    VertexBuffers[vbText]->SetVertexData(vertices);
+    VertexBuffers[vbText]->DrawArrays();
+*/
 
     for (int i = 0; symbols[i]; i++) {
         sym = symbols[i];
@@ -1882,7 +1929,7 @@ void cOglThread::Action(void) {
         Unlock();
         uint64_t start = cTimeMs::Now();
         cmd->Execute();
-        esyslog("[softhddev]\"%s\", %dms, %d commands left, time %" PRIu64 "", cmd->Description(), (int)(cTimeMs::Now() - start), commands.size(), cTimeMs::Now());
+        esyslog("[softhddev]\"%-*s\", %dms, %d commands left, time %" PRIu64 "", 15, cmd->Description(), (int)(cTimeMs::Now() - start), commands.size(), cTimeMs::Now());
         delete cmd;
         if (stalled && commands.size() < OGL_CMDQUEUE_SIZE / 2)
             stalled = false;
