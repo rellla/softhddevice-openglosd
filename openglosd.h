@@ -318,8 +318,9 @@ private:
     cOglOutputFb *oFb;
     GLfloat x, y;
     GLint bcolor;
+    int active;
 public:
-    cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y);
+    cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y, int active);
     virtual ~cOglCmdCopyBufferToOutputFb(void) {};
     virtual const char* Description(void) { return "Copy buffer to OutputFramebuffer"; }
     virtual bool Execute(void);

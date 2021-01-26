@@ -1,4 +1,3 @@
-///
 ///	@file video.c	@brief Video module
 ///
 ///	Copyright (c) 2009 - 2015 by Johns.  All Rights Reserved.
@@ -234,19 +233,23 @@ void SetPlane(VideoRender * render, drmModeAtomicReqPtr ModeReq, uint32_t plane_
 ///
 void SetChangePlanes(VideoRender * render, drmModeAtomicReqPtr ModeReq, int back)
 {
-	uint64_t zpos_video;
-	uint64_t zpos_osd;
+	uint64_t zpos_video = 0;
+	uint64_t zpos_osd = 0;
 
+	fprintf(stderr, "SetChangePlanes %s: zpos_overlay = %lld zpos_primary = %lld\n", back ? "(back)" : "", render->zpos_overlay, render->zpos_primary);
 	if (back) {
 		zpos_video = render->zpos_overlay;
 		zpos_osd = render->zpos_primary;
+		fprintf(stderr, "SetChangePlanes %s: TO zpos_video %lld (zpos_overlay) zpos_osd %lld (zpos_primary)\n", back ? "(back)" : "", zpos_video, zpos_osd);
 	} else {
 		zpos_video = render->zpos_primary;
 		zpos_osd = render->zpos_overlay;
+		fprintf(stderr, "SetChangePlanes %s: TO zpos_video %lld (zpos_primary) zpos_osd %lld (zpos_overlay)\n", back ? "(back)" : "", zpos_video, zpos_osd);
 	}
 
 	SetPlaneZpos(render, ModeReq, render->video_plane, zpos_video);
 	SetPlaneZpos(render, ModeReq, render->osd_plane, zpos_osd);
+	fprintf(stderr, "SetChangePlanes %s: video_plane TO zpos_video %lld osd_plane top zpos_osd %lld\n", back ? "(back)" : "", zpos_video, zpos_osd);
 }
 
 size_t ReadLineFromFile(char *buf, size_t size, char * file)
@@ -523,7 +526,9 @@ search_mode:
 						if (!render->video_plane) {
 							if (type != DRM_PLANE_TYPE_PRIMARY) {
 								render->use_zpos = 1;
+								zpos = 0;
 								render->zpos_overlay = zpos;
+								fprintf(stderr, " VIDEO on OVERLAY zpos %lld (=render->zpos_overlay)", zpos);
 							}
 							render->video_plane = plane->plane_id;
 							if (plane->plane_id == render->osd_plane)
@@ -532,8 +537,11 @@ search_mode:
 						break;
 					case DRM_FORMAT_ARGB8888:
 						if (!render->osd_plane) {
-							if (type != DRM_PLANE_TYPE_OVERLAY)
+							if (type != DRM_PLANE_TYPE_OVERLAY) {
+								zpos = 1;
 								render->zpos_primary = zpos;
+								fprintf(stderr, " OSD on PRIMARY zpos %lld (=render->zpos_primary)", zpos);
+							}
 							render->osd_plane = plane->plane_id;
 						}
 						break;
@@ -1032,12 +1040,13 @@ page_flip:
 				SetChangePlanes(render, ModeReq, 0);
 				render->buf_osd_gl->dirty = 0;
 			}
-#endif
+#else
 			if (render->buf_osd.dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 				SetChangePlanes(render, ModeReq, 0);
 				render->buf_osd.dirty = 0;
 			}
+#endif
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
@@ -1072,12 +1081,13 @@ page_flip:
 				SetChangePlanes(render, ModeReq, 1);
 				render->buf_osd_gl->dirty = 0;
 			}
-#endif
+#else
 			if (render->buf_osd.dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 				SetChangePlanes(render, ModeReq, 1);
 				render->buf_osd.dirty = 0;
 			}
+#endif
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
@@ -1170,10 +1180,36 @@ static void *DisplayHandlerThread(void * arg)
 ///
 void VideoOsdClear(VideoRender * render)
 {
+	fprintf(stderr, "VideoOsdClear()\n");
 #ifndef USE_GLES
 	memset((void *)render->buf_osd.plane[0], 0,
 		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
 	render->buf_osd.dirty = 1;
+#else
+	struct drm_buf *buf;
+
+	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
+	fprintf(stderr, "eglSwapBuffers (clear) copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
+
+	render->next_bo = gbm_surface_lock_front_buffer(render->gbm_surface);
+	assert(render->next_bo);
+
+	buf = drm_get_buf_from_bo(render, render->next_bo);
+	if (!buf) {
+		fprintf(stderr, "Failed to get GL buffer\n");
+		return;
+	}
+
+	render->buf_osd_gl = buf;
+	// release old buffer for writing again
+	if (render->bo)
+		gbm_surface_release_buffer(render->gbm_surface, render->bo);
+
+	// rotate bos and create and keep bo as old_bo to make it free'able
+	render->old_bo = render->bo;
+	render->bo = render->next_bo;
+
+	fprintf(stderr, "GLDrmOsdClear width: %i height: %i pitch: %i\n", buf->width, buf->height, buf->pitch[0]);
 #endif
 
 	render->OsdShown = 0;
@@ -1205,7 +1241,7 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	struct drm_buf *buf;
 
 	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
-	fprintf(stderr, "eglSwapBuffers copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
+	fprintf(stderr, "eglSwapBuffers (draw) copy buffer to output surface eglDisplay %p eglSurface %p\n", render->eglDisplay, render->eglSurface);
 
 	render->next_bo = gbm_surface_lock_front_buffer(render->gbm_surface);
 	assert(render->next_bo);
@@ -1217,34 +1253,6 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 	}
 
 	render->buf_osd_gl = buf;
-
-#ifdef WRITE_PNG
-	uint32_t stride;
-	void *map_data;
-	void *result = gbm_bo_map(render->next_bo, 0, 0, width, height, GBM_BO_TRANSFER_READ, &stride, &map_data);
-
-	if (!result) {
-		fprintf(stderr, "couldn't map BO\n");
-		return;
-	}
-
-	assert(stride == (uint32_t)(width * 4));
-
-/* raw copy to osd plane
-	for (int i = 0; i < height; ++i) {
-		memcpy(render->buf_osd.plane[0] + i * stride, result + i * stride, (size_t)stride);
-	}
-*/
-
-	static int scr_nr = 0;
-	char filename[18];
-	snprintf(filename, sizeof(filename), "screenshot%03d.png", scr_nr++);
-
-	assert(!writeImage(filename, width, height, (GLubyte *)result, "test_osd"));
-
-	if (result)
-		gbm_bo_unmap(render->next_bo, map_data);
-#endif
 	// release old buffer for writing again
 	if (render->bo)
 		gbm_surface_release_buffer(render->gbm_surface, render->bo);
@@ -1268,7 +1276,6 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.draw_x) * 4 + (i + y - render->buf_osd.draw_y)
 		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
-
 
 //	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
 //	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);

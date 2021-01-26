@@ -1047,11 +1047,12 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
 }
 
 //------------------ cOglCmdCopyBufferToOutputFb --------------------
-cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y) : cOglCmd(fb) {
+cOglCmdCopyBufferToOutputFb::cOglCmdCopyBufferToOutputFb(cOglFb *fb, cOglOutputFb *oFb, GLint x, GLint y, int active) : cOglCmd(fb) {
     this->oFb = oFb;
     this->x = (GLfloat)x;
     this->y = (GLfloat)y;
     this->bcolor = BORDERCOLOR;
+    this->active = active;
 }
 
 bool cOglCmdCopyBufferToOutputFb::Execute(void) {
@@ -1096,7 +1097,10 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
 //    GL_CHECK(glFinish());
 
     // eglSwapBuffers and gbm_surface_lock_front_buffer in OsdDrawARGB()
-    OsdDrawARGB(0, 0, oFb->Width(), oFb->Height(), 0, 0, oFb->Width(), oFb->Height());
+    if (active)
+        OsdDrawARGB(0, 0, oFb->Width(), oFb->Height(), 0, 0, oFb->Width(), oFb->Height());
+    else
+        OsdClose();
 
     return true;
 }
@@ -1900,7 +1904,7 @@ bool cOglThread::InitOpenGL(void) {
     // We have to wait for the EGL Context to be created
     // Should be solved with a mutex
     // HACK:
-    // sleep(2);
+    sleep(2);
 
     eglAcquireContext(); /* eglMakeCurrent with new eglSurface */
 
@@ -2190,6 +2194,7 @@ void cOglPixmap::Pan(const cPoint &Dest, const cRect &Source) {
 cOglOutputFb *cOglOsd::oFb = NULL;
 
 cOglOsd::cOglOsd(int Left, int Top, uint Level, std::shared_ptr<cOglThread> oglThread) : cOsd(Left, Top, Level) {
+    fprintf(stderr, "cOglOsd::cOglOsd\n");
     this->oglThread = oglThread;
     bFb = NULL;
     isSubtitleOsd = false;
@@ -2207,15 +2212,20 @@ cOglOsd::cOglOsd(int Left, int Top, uint Level, std::shared_ptr<cOglThread> oglT
 }
 
 cOglOsd::~cOglOsd() {
+    fprintf(stderr, "~cOglOsd\n");
+
     if (!oglThread->Active())
         return;
+    oglThread->DoCmd(new cOglCmdFill(bFb, clrTransparent));
     oglThread->DoCmd(new cOglCmdBufferFill(oFb, clrTransparent));
-    OsdClose();
-    SetActive(false);
-    oglThread->DoCmd(new cOglCmdDeleteFb(bFb));
+    oglThread->DoCmd(new cOglCmdCopyBufferToOutputFb(bFb, oFb, Left(), Top(), 0));
+//    SetActive(false);
+//    OsdClose();
+//    oglThread->DoCmd(new cOglCmdDeleteFb(bFb));
 }
 
 eOsdError cOglOsd::SetAreas(const tArea *Areas, int NumAreas) {
+    fprintf(stderr, "cOglOsd::SetAreas\n");
     cRect r;
     if (NumAreas > 1)
         isSubtitleOsd = true;
@@ -2238,6 +2248,7 @@ eOsdError cOglOsd::SetAreas(const tArea *Areas, int NumAreas) {
 }
 
 cPixmap *cOglOsd::CreatePixmap(int Layer, const cRect &ViewPort, const cRect &DrawPort) {
+    fprintf(stderr, "cOglOsd::CreatePixMap\n");
     if (!oglThread->Active())
         return NULL;
     LOCK_PIXMAPS;
@@ -2267,6 +2278,7 @@ cPixmap *cOglOsd::CreatePixmap(int Layer, const cRect &ViewPort, const cRect &Dr
 }
 
 void cOglOsd::DestroyPixmap(cPixmap *Pixmap) {
+    fprintf(stderr, "cOglOsd::DestroyPixMap\n");
     if (!oglThread->Active())
         return;
     if (!Pixmap)
@@ -2287,6 +2299,7 @@ void cOglOsd::DestroyPixmap(cPixmap *Pixmap) {
 }
 
 void cOglOsd::Flush(void) {
+    fprintf(stderr, "cOglOsd::Flush\n");
     if (!oglThread->Active())
         return;
     LOCK_PIXMAPS;
@@ -2321,12 +2334,13 @@ void cOglOsd::Flush(void) {
     }
     //copy buffer to output framebuffer
     oglThread->DoCmd(new cOglCmdBufferFill(oFb, clrTransparent));
-    oglThread->DoCmd(new cOglCmdCopyBufferToOutputFb(bFb, oFb, Left(), Top()));
+    oglThread->DoCmd(new cOglCmdCopyBufferToOutputFb(bFb, oFb, Left(), Top(), 1));
 
     dsyslog("[softhddev]End Flush at %" PRIu64 ", duration %d", cTimeMs::Now(), (int)(cTimeMs::Now()-start));
 }
 
 void cOglOsd::DrawScaledBitmap(int x, int y, const cBitmap &Bitmap, double FactorX, double FactorY, bool AntiAlias) {
+    fprintf(stderr, "cOglOsd::DrawScaledBitmap\n");
     (void)FactorX;
     (void)FactorY;
     (void)AntiAlias;

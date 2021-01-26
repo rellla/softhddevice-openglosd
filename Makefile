@@ -20,12 +20,12 @@ CONFIG += -DDEBUG 				# enable debug output+functions
 ifeq ($(GLES),1)
 CONFIG += -DUSE_GLES
 CONFIG += -DGL_DEBUG
-#CONFIG += -DWRITE_PNG
+CONFIG += -DWRITE_PNG
 endif
 #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
 #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
-#CONFIG += -DOSD_DEBUG			# enable debug messages OSD
-#CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
+CONFIG += -DOSD_DEBUG			# enable debug messages OSD
+CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
 #CONFIG += -DSTILL_DEBUG		# still picture debug
 #CONFIG += -DMEDIA_DEBUG		# media player debug
