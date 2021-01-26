@@ -107,22 +107,42 @@ private:
     GLuint texture;
     void LoadTexture(FT_BitmapGlyph ftGlyph);
 public:
-    cOglGlyph(uint charCode, FT_BitmapGlyph ftGlyph);
+    cOglGlyph(FT_ULong charCode, FT_BitmapGlyph ftGlyph);
     virtual ~cOglGlyph();
-    uint CharCode(void) { return charCode; }
+    FT_ULong CharCode(void) { return charCode; }
     int AdvanceX(void) { return advanceX; }
     int BearingLeft(void) const { return bearingLeft; }
     int BearingTop(void) const { return bearingTop; }
     int Width(void) const { return width; }
     int Height(void) const { return height; }
-    int GetKerningCache(uint prevSym);
-    void SetKerningCache(uint prevSym, int kerning);
+    int GetKerningCache(FT_ULong prevSym);
+    void SetKerningCache(FT_ULong prevSym, int kerning);
     void BindTexture(void);
 };
 
 /****************************************************************************************
 * cOglFont
 ****************************************************************************************/
+class cOglFontAtlas {
+private:
+    GLuint tex;
+    int w;
+    int h;
+    struct {
+        float ax;
+        float ay;
+        float bw;
+        float bh;
+        float bl;
+        float bt;
+        float tx;
+        float ty;
+    } c[128];
+public:
+    cOglFontAtlas(FT_Face face, int height);
+    virtual ~cOglFontAtlas(void);
+};
+
 class cOglFont : public cListObject {
 private:
     static bool initiated;
@@ -136,6 +156,7 @@ private:
     mutable cList<cOglGlyph> glyphCache;
     cOglFont(const char *fontName, int charHeight);
     static void Init(void);
+    cOglFontAtlas *Atlas;
 public:
     virtual ~cOglFont(void);
     static cOglFont *Get(const char *name, int charHeight);

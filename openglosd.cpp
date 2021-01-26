@@ -430,6 +430,107 @@ FT_Library cOglFont::ftLib = 0;
 cList<cOglFont> *cOglFont::fonts = 0;
 bool cOglFont::initiated = false;
 
+#define MAX_ATLAS_WIDTH 1024
+cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
+    FT_Set_Pixel_Sizes(face, 0, height);
+    FT_GlyphSlot g = face->glyph;
+
+    int roww = 0;
+    int rowh = 0;
+    w = 0;
+    h = 0;
+
+    memset(c, 0, sizeof c);
+
+    for (int i = 32; i < 128; i++) {
+        if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
+            fprintf(stderr, "Loading char %c failed (1)!\n", i);
+            continue;
+        }
+        if (roww + g->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
+            w = std::max(w, roww);
+            h += rowh;
+            roww = 0;
+            rowh = 0;
+        }
+        roww += g->bitmap.width + 1;
+        rowh = std::max(rowh, (int)g->bitmap.rows);
+    }
+
+    w = std::max(w, roww);
+    h += rowh;
+
+    GL_CHECK(glGenTextures(1, &tex));
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, tex));
+    GL_CHECK(glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_LUMINANCE,
+        w,
+        h,
+        0,
+        GL_LUMINANCE,
+        GL_UNSIGNED_BYTE,
+        0
+    ));
+
+    GL_CHECK(glPixelStorei(GL_UNPACK_ALIGNMENT, 1));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+
+    int ox = 0;
+    int oy = 0;
+
+    rowh = 0;
+
+    for (int i = 32; i < 128; i++) {
+        if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
+            fprintf(stderr, "Loading char %c failed (1)!\n", i);
+            continue;
+        }
+
+        if (ox + g->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
+            oy += rowh;
+            rowh = 0;
+            ox = 0;
+        }
+
+        GL_CHECK(glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0,
+            ox,
+            oy,
+            g->bitmap.width,
+            g->bitmap.rows,
+            GL_LUMINANCE,
+            GL_UNSIGNED_BYTE,
+            g->bitmap.buffer
+        ));
+
+        c[i].ax = g->advance.x >> 6;
+        c[i].ay = g->advance.y >> 6;
+        c[i].bw = g->bitmap.width;
+        c[i].bh = g->bitmap.rows;
+        c[i].bl = g->bitmap_left;
+        c[i].bt = g->bitmap_top;
+        c[i].tx = ox / (float)w;
+        c[i].ty = oy / (float)h;
+
+        rowh = std::max(rowh, (int)g->bitmap.rows);
+        ox += g->bitmap.width + 1;
+    }
+
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
+    fprintf(stderr, "Created a %d x %d (%d kB) FontAtlas for fontsize %d\n", w, h, w * h / 1024, height);
+}
+
+cOglFontAtlas::~cOglFontAtlas(void) {
+    GL_CHECK(glDeleteTextures(1, &tex));
+    fprintf(stderr, "Delete FontAtlas\n");
+}
+
 cOglFont::cOglFont(const char *fontName, int charHeight) : name(fontName) {
     size = charHeight;
     height = 0;
@@ -439,9 +540,27 @@ cOglFont::cOglFont(const char *fontName, int charHeight) : name(fontName) {
     if (error)
         esyslog("[softhddev]ERROR: failed to open %s!", *name);
 
+    FT_ULong charcode;
+    FT_UInt gindex;
+    int count = 0;
+    int min_index = 0;
+    int max_index = 0;
+
+    charcode = FT_Get_First_Char(face, &gindex);
+    min_index = gindex;
+    max_index = gindex;
+    while (gindex != 0) {
+        count++;
+        charcode = FT_Get_Next_Char(face, charcode, &gindex);
+        min_index = std::min(min_index, (int)gindex);
+        max_index = std::max(max_index, (int)gindex);
+    }
+
     FT_Set_Char_Size(face, 0, charHeight * 64, 0, 0);
     height = (face->size->metrics.ascender - face->size->metrics.descender + 63) / 64;
     bottom = abs((face->size->metrics.descender - 63) / 64);
+    this->Atlas = new cOglFontAtlas(face, charHeight);
+    fprintf(stderr, "Created new font: %s (%d) height: %d, bottom: %d - %d chars (%d - %d)\n", fontName, charHeight, height, bottom, count, min_index, max_index);
 }
 
 cOglFont::~cOglFont(void) {
