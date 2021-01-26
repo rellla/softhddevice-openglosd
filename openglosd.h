@@ -90,14 +90,14 @@ class cOglGlyph : public cListObject {
 private:
     struct tKerning {
         public:
-            tKerning(uint prevSym, GLfloat kerning = 0.0f)  {
+            tKerning(FT_ULong prevSym, GLfloat kerning = 0.0f)  {
                 this->prevSym = prevSym;
                 this->kerning = kerning;
             }
-            uint prevSym;
+            FT_ULong prevSym;
             GLfloat kerning;
     };
-    uint charCode;
+    FT_ULong charCode;
     int bearingLeft;
     int bearingTop;
     int width;
@@ -144,8 +144,8 @@ public:
     int Size(void) { return size; };
     int Bottom(void) {return bottom; };
     int Height(void) {return height; };
-    cOglGlyph* Glyph(uint charCode) const;
-    int Kerning(cOglGlyph *glyph, uint prevSym) const;
+    cOglGlyph* Glyph(FT_ULong charCode) const;
+    int Kerning(cOglGlyph *glyph, FT_ULong prevSym) const;
 };
 
 /****************************************************************************************
@@ -185,6 +185,8 @@ public:
 class cOglOutputFb : public cOglFb {
 private:
 public:
+    GLuint fb;
+    GLuint texture;
     cOglOutputFb(GLint width, GLint height);
     virtual ~cOglOutputFb(void);
     virtual bool Init(void);

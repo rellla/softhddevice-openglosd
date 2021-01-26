@@ -365,7 +365,7 @@ bool cShader::CheckCompileErrors(GLuint object, bool program) {
 /****************************************************************************************
 * cOglGlyph
 ****************************************************************************************/
-cOglGlyph::cOglGlyph(uint charCode, FT_BitmapGlyph ftGlyph) {
+cOglGlyph::cOglGlyph(FT_ULong charCode, FT_BitmapGlyph ftGlyph) {
     this->charCode = charCode;
     bearingLeft = ftGlyph->left;
     bearingTop = ftGlyph->top;
@@ -379,7 +379,7 @@ cOglGlyph::~cOglGlyph(void) {
 
 }
 
-int cOglGlyph::GetKerningCache(uint prevSym) {
+int cOglGlyph::GetKerningCache(FT_ULong prevSym) {
     for (int i = kerningCache.Size(); --i > 0; ) {
         if (kerningCache[i].prevSym == prevSym)
             return kerningCache[i].kerning;
@@ -387,7 +387,7 @@ int cOglGlyph::GetKerningCache(uint prevSym) {
     return KERNING_UNKNOWN;
 }
 
-void cOglGlyph::SetKerningCache(uint prevSym, int kerning) {
+void cOglGlyph::SetKerningCache(FT_ULong prevSym, int kerning) {
     kerningCache.Append(tKerning(prevSym, kerning));
 }
 
@@ -463,9 +463,11 @@ cOglFont *cOglFont::Get(const char *name, int charHeight) {
 }
 
 void cOglFont::Init(void) {
-    fonts = new cList<cOglFont>;
-    if (FT_Init_FreeType(&ftLib))
+    if (FT_Init_FreeType(&ftLib)) {
         esyslog("[softhddev]failed to initialize FreeType library!");
+        return;
+    }
+    fonts = new cList<cOglFont>;
     initiated = true;
 }
 
@@ -474,11 +476,13 @@ void cOglFont::Cleanup(void) {
         return;
     delete fonts;
     fonts = 0;
-    if (FT_Done_FreeType(ftLib))
+    if (ftLib && FT_Done_FreeType(ftLib))
         esyslog("failed to deinitialize FreeType library!");
+
+    ftLib = 0;
 }
 
-cOglGlyph* cOglFont::Glyph(uint charCode) const {
+cOglGlyph* cOglFont::Glyph(FT_ULong charCode) const {
     // Non-breaking space:
     if (charCode == 0xA0)
         charCode = 0x20;
@@ -514,7 +518,7 @@ cOglGlyph* cOglFont::Glyph(uint charCode) const {
                     FT_STROKER_LINEJOIN_ROUND,
                     0);
 
-    
+
     error = FT_Get_Glyph(face->glyph, &ftGlyph);
     if (error) {
         esyslog("[softhddev]FT_Get_Glyph FT_Error (0x%02x) : %s\n", FT_Errors[error].code, FT_Errors[error].message);
@@ -541,7 +545,7 @@ cOglGlyph* cOglFont::Glyph(uint charCode) const {
     return Glyph;
 }
 
-int cOglFont::Kerning(cOglGlyph *glyph, uint prevSym) const {
+int cOglFont::Kerning(cOglGlyph *glyph, FT_ULong prevSym) const {
     int kerning = 0;
     if (glyph && prevSym) {
         kerning = glyph->GetKerningCache(prevSym);
@@ -575,8 +579,10 @@ cOglFb::cOglFb(GLint width, GLint height, GLint viewPortWidth, GLint viewPortHei
 }
 
 cOglFb::~cOglFb(void) {
-    GL_CHECK(glDeleteTextures(1, &texture));
-    GL_CHECK(glDeleteFramebuffers(1, &fb));
+    if (texture)
+        GL_CHECK(glDeleteTextures(1, &texture));
+    if (fb)
+        GL_CHECK(glDeleteFramebuffers(1, &fb));
 }
 
 bool cOglFb::Init(void) {
@@ -637,9 +643,15 @@ cOglOutputFb::cOglOutputFb(GLint width, GLint height) : cOglFb(width, height, wi
     initiated = false;
     this->width = width;
     this->height = height;
+    fb = 0;
+    texture = 0;
 }
 
 cOglOutputFb::~cOglOutputFb(void) {
+    if (texture)
+        GL_CHECK(glDeleteTextures(1, &texture));
+    if (fb)
+        GL_CHECK(glDeleteFramebuffers(1, &fb));
 }
 
 bool cOglOutputFb::Init(void) {
@@ -649,8 +661,8 @@ bool cOglOutputFb::Init(void) {
     GL_CHECK(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
     GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)); // CLAMP_TO_BORDER?
+    GL_CHECK(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)); // CLAMP_TO_BORDER?
     GL_CHECK(glGenFramebuffers(1, &fb));
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, fb));
 
@@ -674,7 +686,7 @@ void cOglOutputFb::BindWrite(void) {
 }
 
 void cOglOutputFb::Unbind(void) {
-    GL_CHECK(glFinish());
+    GL_CHECK(glFinish()); //??
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
     GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, 0));
 }
@@ -854,7 +866,8 @@ cOglCmdDeleteFb::cOglCmdDeleteFb(cOglFb *fb) : cOglCmd(fb) {
 }
 
 bool cOglCmdDeleteFb::Execute(void) {
-    delete fb;
+    if (fb)
+        delete fb;
     return true;
 }
 
@@ -1313,6 +1326,7 @@ cOglCmdDrawText::cOglCmdDrawText( cOglFb *fb, GLint x, GLint y, unsigned int *sy
     this->colorText = colorText;
     this->fontSize = fontSize;
     this->symbols = symbols;
+    this->fontName = name;
 }
 
 cOglCmdDrawText::~cOglCmdDrawText(void) {
@@ -1334,15 +1348,15 @@ bool cOglCmdDrawText::Execute(void) {
     int xGlyph = x;
     int fontHeight = f->Height();
     int bottom = f->Bottom();
-    uint sym = 0;
-    uint prevSym = 0;
+    FT_ULong sym = 0;
+    FT_ULong prevSym = 0;
     int kerning = 0;
 
     for (int i = 0; symbols[i]; i++) {
         sym = symbols[i];
         cOglGlyph *g = f->Glyph(sym);
         if (!g) {
-            esyslog("[softhddev]ERROR: could not load glyph %x", sym);
+            esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
         }
 
         if ( limitX && xGlyph + g->AdvanceX() > limitX )
@@ -1502,7 +1516,7 @@ bool cOglCmdDrawTexture::Execute(void) {
 //------------------ cOglCmdStoreImage --------------------
 cOglCmdStoreImage::cOglCmdStoreImage(sOglImage *imageRef, tColor *argb) : cOglCmd(NULL) {
     this->imageRef = imageRef;
-    data = argb;    
+    data = argb;
 }
 
 cOglCmdStoreImage::~cOglCmdStoreImage(void) {
@@ -1599,6 +1613,11 @@ void cOglThread::DoCmd(cOglCmd* cmd) {
 }
 
 int cOglThread::StoreImage(const cImage &image) {
+    if (!maxCacheSize) {
+        esyslog("[softhddev] cannot store image, no cache set");
+        return 0;
+    }
+
     if (image.Width() > maxTextureSize || image.Height() > maxTextureSize) {
         esyslog("[softhddev] cannot store image of %dpx x %dpx "
                 "(maximum size is %dpx x %dpx) - falling back to "
@@ -1726,7 +1745,6 @@ void cOglThread::Action(void) {
     //now Thread is ready to do his job
     startWait->Signal();
     stalled = false;
-
 
     while(Running()) {
 
@@ -1914,7 +1932,11 @@ void cOglPixmap::DrawImage(const cPoint &Point, int ImageHandle) {
 }
 
 void cOglPixmap::DrawPixel(const cPoint &Point, tColor Color) {
-    esyslog("[softhddev] DrawPixel %d %d color %x not implemented in OpenGl OSD", Point.X(), Point.X(), Color);
+    cRect r(Point.X(), Point.Y(), 1, 1);
+    oglThread->DoCmd(new cOglCmdDrawRectangle(fb, r.X(), r.Y(), r.Width(), r.Height(), Color));
+
+    SetDirty();
+    MarkDrawPortDirty(r);
 }
 
 void cOglPixmap::DrawBitmap(const cPoint &Point, const cBitmap &Bitmap, tColor ColorFg, tColor ColorBg, bool Overlay) {
