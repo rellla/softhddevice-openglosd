@@ -209,6 +209,7 @@ void SetPlaneSrc(VideoRender * render, drmModeAtomicReqPtr ModeReq, uint32_t pla
 
 void SetPlaneZpos(VideoRender * render, drmModeAtomicReqPtr ModeReq, uint32_t plane_id, uint64_t zpos)
 {
+	fprintf(stderr, "SetPlaneZpos: plane %d to zpos %lld\n", plane_id, zpos);
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
 			DRM_MODE_OBJECT_PLANE, "zpos", zpos);
 }
@@ -1041,7 +1042,8 @@ page_flip:
 
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-				SetChangePlanes(render, ModeReq, 0);
+				SetPlaneZpos(render, ModeReq, render->video_plane, render->zpos_primary);
+				SetPlaneZpos(render, ModeReq, render->osd_plane, render->zpos_overlay);
 				render->buf_osd_gl->dirty = 0;
 			}
 #else
@@ -1081,7 +1083,8 @@ page_flip:
 			}
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-				SetChangePlanes(render, ModeReq, 1);
+				SetPlaneZpos(render, ModeReq, render->video_plane, render->zpos_overlay);
+				SetPlaneZpos(render, ModeReq, render->osd_plane, render->zpos_primary);
 				render->buf_osd_gl->dirty = 0;
 			}
 #else
@@ -2071,6 +2074,9 @@ void VideoInit(VideoRender * render)
 		SetPlaneFbId(render, ModeReq, prime_plane, render->buf_osd.fb_id);
 #else
 		// We don't have the buf_osd_gl yet, so we can't set anything
+		// Initially move the OSD behind the VIDEO
+		SetPlaneZpos(render, ModeReq, render->video_plane, render->zpos_overlay);
+		SetPlaneZpos(render, ModeReq, render->osd_plane, render->zpos_primary);
 #endif
 		// Black Buffer
 		SetPlaneCrtc(render, ModeReq, overlay_plane, 0, 0, render->mode.hdisplay, render->mode.vdisplay);
