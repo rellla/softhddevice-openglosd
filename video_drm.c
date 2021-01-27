@@ -525,10 +525,13 @@ search_mode:
 					case DRM_FORMAT_NV12:
 						if (!render->video_plane) {
 							if (type != DRM_PLANE_TYPE_PRIMARY) {
+								/* We have found a NV12 plane as OVERLAY_PLANE
+								 * so we use the zpos to switch between the
+								 */
 								render->use_zpos = 1;
 //								zpos = 0;
 								render->zpos_overlay = zpos;
-								fprintf(stderr, " VIDEO on OVERLAY zpos %lld (=render->zpos_overlay)", zpos);
+								fprintf(stderr, "\nVIDEO on OVERLAY zpos %lld (=render->zpos_overlay)\n", zpos);
 							}
 							render->video_plane = plane->plane_id;
 							if (plane->plane_id == render->osd_plane)
@@ -540,7 +543,7 @@ search_mode:
 							if (type != DRM_PLANE_TYPE_OVERLAY) {
 //								zpos = 1;
 								render->zpos_primary = zpos;
-								fprintf(stderr, " OSD on PRIMARY zpos %lld (=render->zpos_primary)", zpos);
+								fprintf(stderr, "\nOSD on PRIMARY zpos %lld (=render->zpos_primary)\n", zpos);
 							}
 							render->osd_plane = plane->plane_id;
 						}
@@ -1028,14 +1031,15 @@ page_flip:
 	if (render->OsdShown) {
 		if (render->use_zpos) {
 #ifdef USE_GLES
-			if (render->buf_osd_gl && (!render->buf_osd_gl->init || render->buf_osd_gl->dirty)) {
-				if (!render->buf_osd_gl->init) {
-					fprintf(stderr, "init 1\n");
-					SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
-						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
-						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
-					render->buf_osd_gl->init = 1;
-				}
+			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
+				fprintf(stderr, "SetPlane while OsdShown and use_zpos\n");
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+				render->buf_osd_gl->init = 1;
+			}
+
+			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 				SetChangePlanes(render, ModeReq, 0);
 				render->buf_osd_gl->dirty = 0;
@@ -1050,7 +1054,7 @@ page_flip:
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
-				fprintf(stderr, "init 2\n");
+				fprintf(stderr, "SetPlane while OsdShown and !use_zpos\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
@@ -1058,7 +1062,6 @@ page_flip:
 			}
 #else
 			if (render->buf_osd.dirty) {
-				fprintf(stderr, "init 3\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 					 render->buf_osd.draw_x, render->buf_osd.draw_y, render->buf_osd.draw_width, render->buf_osd.draw_height,
 					 0, 0, render->buf_osd.draw_width, render->buf_osd.draw_height);
@@ -1069,14 +1072,14 @@ page_flip:
 	} else {
 		if (render->use_zpos) {
 #ifdef USE_GLES
-			if (render->buf_osd_gl && (!render->buf_osd_gl->init || render->buf_osd_gl->dirty)) {
-				if (!render->buf_osd_gl->init) {
-					fprintf(stderr, "init 4\n");
-					SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
-						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
-						 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
-					render->buf_osd_gl->init = 1;
-				}
+			if (render->buf_osd_gl && !render->buf_osd_gl->init) {
+				fprintf(stderr, "SetPlane while !OsdShown and use_zpos\n");
+				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
+					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height);
+				render->buf_osd_gl->init = 1;
+			}
+			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
 				flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 				SetChangePlanes(render, ModeReq, 1);
 				render->buf_osd_gl->dirty = 0;
@@ -1091,7 +1094,7 @@ page_flip:
 		} else {
 #ifdef USE_GLES
 			if (render->buf_osd_gl && render->buf_osd_gl->dirty) {
-				fprintf(stderr, "init 5\n");
+				fprintf(stderr, "SetPlane while !OsdShown and !use_zpos\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd_gl->fb_id,
 					 0, 0, render->buf_osd_gl->width, render->buf_osd_gl->height,
 					 0, 0, 0, 0);
@@ -1099,7 +1102,6 @@ page_flip:
 			}
 #else
 			if (render->buf_osd.dirty) {
-				fprintf(stderr, "init 6\n");
 				SetPlane(render, ModeReq, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
 					 0, 0, render->buf_osd.width, render->buf_osd.height,
 					 0, 0, 0, 0);
@@ -1181,11 +1183,7 @@ static void *DisplayHandlerThread(void * arg)
 void VideoOsdClear(VideoRender * render)
 {
 	fprintf(stderr, "VideoOsdClear()\n");
-#ifndef USE_GLES
-	memset((void *)render->buf_osd.plane[0], 0,
-		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
-	render->buf_osd.dirty = 1;
-#else
+#ifdef USE_GLES
 	struct drm_buf *buf;
 
 	EGL_CHECK(eglSwapBuffers(render->eglDisplay, render->eglSurface));
@@ -1212,6 +1210,10 @@ void VideoOsdClear(VideoRender * render)
 	render->bo = render->next_bo;
 
 	fprintf(stderr, "GLDrmOsdClear width: %i height: %i pitch: %i\n", buf->width, buf->height, buf->pitch[0]);
+#else
+	memset((void *)render->buf_osd.plane[0], 0,
+		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
+	render->buf_osd.dirty = 1;
 #endif
 
 	render->OsdShown = 0;
