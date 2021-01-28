@@ -121,7 +121,47 @@ public:
 };
 
 /****************************************************************************************
-* cOglFont
+* cOglAtlasGlyph
+****************************************************************************************/
+class cOglAtlasGlyph : public cListObject {
+private:
+    struct tKerning {
+        public:
+            tKerning(FT_ULong prevSym, GLfloat kerning = 0.0f)  {
+                this->prevSym = prevSym;
+                this->kerning = kerning;
+            }
+            FT_ULong prevSym;
+            GLfloat kerning;
+    };
+    FT_ULong charCode;
+    int bearingLeft;
+    int bearingTop;
+    int width;
+    int height;
+    int advanceX;
+    int advanceY;
+    float xoffset;
+    float yoffset;
+    cVector<tKerning> kerningCache;
+public:
+    cOglAtlasGlyph(FT_ULong charCode, float advanceX, float advanceY, float width, float height, float bearingLeft, float bearingTop, float xoffset, float yoffset);
+    virtual ~cOglAtlasGlyph();
+    FT_ULong CharCode(void) { return charCode; }
+    int AdvanceX(void) { return advanceX; }
+    int AdvanceY(void) { return advanceY; }
+    int BearingLeft(void) const { return bearingLeft; }
+    int BearingTop(void) const { return bearingTop; }
+    int Width(void) const { return width; }
+    int Height(void) const { return height; }
+    float XOffset(void) const { return xoffset; }
+    float YOffset(void) const { return yoffset; }
+    int GetKerningCache(FT_ULong prevSym);
+    void SetKerningCache(FT_ULong prevSym, int kerning);
+};
+
+/****************************************************************************************
+* cOglFontAtlas
 ****************************************************************************************/
 class cOglFontAtlas {
 private:
@@ -137,14 +177,22 @@ private:
         float bt;
         float tx;
         float ty;
+        cOglAtlasGlyph *Glyph;
     } c[128];
-    int height;
+    int fontheight;
 public:
     cOglFontAtlas(FT_Face face, int height);
     virtual ~cOglFontAtlas(void);
-    int Height(void) const { return height; }
+    cOglAtlasGlyph* Glyph(int sym) const;
+    int FontHeight(void) const { return fontheight; }
+    int Height(void) const { return h; }
+    int Width(void) const { return w; }
+    void BindTexture(void);
 };
 
+/****************************************************************************************
+* cOglFont
+****************************************************************************************/
 class cOglFont : public cListObject {
 private:
     static bool initiated;
@@ -170,6 +218,7 @@ public:
     int Height(void) {return height; };
     cOglGlyph* Glyph(FT_ULong charCode) const;
     int Kerning(cOglGlyph *glyph, FT_ULong prevSym) const;
+    int AtlasKerning(cOglAtlasGlyph *glyph, FT_ULong prevSym) const;
 };
 
 /****************************************************************************************
@@ -257,6 +306,7 @@ public:
     void SetShaderTexture(GLint value);
     void SetShaderAlpha(GLint alpha);
     void SetShaderProjectionMatrix(GLint width, GLint height);
+    void SetVertexSubData(GLfloat *vertices, int count = 0);
     void SetVertexData(GLfloat *vertices, int count = 0);
     void DrawArrays(int count = 0);
 };
@@ -395,11 +445,12 @@ private:
     GLint x, y;
     GLint limitX;
     GLint colorText;
+    int length;
     cString fontName;
     int fontSize;
     unsigned int *symbols;
 public:
-    cOglCmdDrawText(cOglFb *fb, GLint x, GLint y, unsigned int *symbols, GLint limitX, const char *name, int fontSize, tColor colorText);
+    cOglCmdDrawText(cOglFb *fb, GLint x, GLint y, unsigned int *symbols, GLint limitX, const char *name, int fontSize, tColor colorText, int length);
     virtual ~cOglCmdDrawText(void);
     virtual const char* Description(void) { return "DrawText     "; }
     virtual bool Execute(void);

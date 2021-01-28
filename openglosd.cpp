@@ -424,27 +424,62 @@ void cOglGlyph::LoadTexture(FT_BitmapGlyph ftGlyph) {
 
 
 /****************************************************************************************
-* cOglFont
+* cOglAtlasGlyph
 ****************************************************************************************/
-FT_Library cOglFont::ftLib = 0;
-cList<cOglFont> *cOglFont::fonts = 0;
-bool cOglFont::initiated = false;
-
-#define MAX_ATLAS_WIDTH 1024
-cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
+cOglAtlasGlyph::cOglAtlasGlyph(FT_ULong charCode, float advanceX, float advanceY,
+                               float width, float height,
+                               float bearingLeft, float bearingTop,
+                               float xoffset, float yoffset) {
+    this->charCode = charCode;
+    this->bearingLeft = bearingLeft;
+    this->bearingTop = bearingTop;
+    this->width = width;
     this->height = height;
+    this->advanceX = advanceX;   //value in 1/2^16 pixel
+    this->advanceY = advanceY;   //value in 1/2^16 pixel
+    this->xoffset = xoffset;
+    this->yoffset = yoffset;
+}
+
+cOglAtlasGlyph::~cOglAtlasGlyph(void) {
+
+}
+
+int cOglAtlasGlyph::GetKerningCache(FT_ULong prevSym) {
+    for (int i = kerningCache.Size(); --i > 0; ) {
+        if (kerningCache[i].prevSym == prevSym)
+            return kerningCache[i].kerning;
+    }
+    return KERNING_UNKNOWN;
+}
+
+void cOglAtlasGlyph::SetKerningCache(FT_ULong prevSym, int kerning) {
+    kerningCache.Append(tKerning(prevSym, kerning));
+}
+
+
+/****************************************************************************************
+* cOglFontAtlas
+****************************************************************************************/
+#define MAX_ATLAS_WIDTH 1024
+#define MIN_CHARCODE 32
+#define MAX_CHARCODE 126
+cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
+    this->fontheight = height;
 
     FT_Set_Pixel_Sizes(face, 0, height);
     FT_GlyphSlot g = face->glyph;
 
     int roww = 0;
     int rowh = 0;
+    int rows = 1;
     w = 0;
     h = 0;
 
     memset(c, 0, sizeof c);
 
-    for (int i = 32; i < 128; i++) {
+    /* Find the minimum size for the texture holding all visible ASCII characters */
+    for (int i = MIN_CHARCODE; i <= MAX_CHARCODE; i++) {
         if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
             fprintf(stderr, "Loading char %c failed (1)!\n", i);
             continue;
@@ -452,16 +487,22 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
         if (roww + g->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
             w = std::max(w, roww);
             h += rowh;
+            fprintf(stderr, "New row with rowh %d, new height %d\n", rowh, h);
             roww = 0;
             rowh = 0;
+            rows++;
         }
         roww += g->bitmap.width + 1;
+        fprintf(stderr, "rowh is max of rowh %d and (int)g->bitmap.rows %d\n", rowh, (int)g->bitmap.rows);
         rowh = std::max(rowh, (int)g->bitmap.rows);
     }
 
     w = std::max(w, roww);
     h += rowh;
 
+    fprintf(stderr, "We need a %d x %d (%d kB) FontAtlas for fontsize %d with %d rows\n", w, h, w * h / 1024, height, rows);
+
+    /* Create a texture that will be used to hold all ASCII glyphs */
     GL_CHECK(glGenTextures(1, &tex));
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, tex));
     GL_CHECK(glTexImage2D(
@@ -487,7 +528,45 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
 
     rowh = 0;
 
-    for (int i = 32; i < 128; i++) {
+    for (int i = MIN_CHARCODE; i <= MAX_CHARCODE; i++) {
+        // do some glyph manipulation
+
+        if (FT_Load_Char(face, i, FT_LOAD_NO_BITMAP)) {
+            fprintf(stderr, "Loading char %c failed (1)!\n", i);
+            continue;
+        }
+
+        FT_Glyph ftGlyph;
+        FT_Stroker stroker;
+        if (FT_Stroker_New(g->library, &stroker)) {
+            fprintf(stderr, "FT_Stroker_New error!\n");
+            return;
+        }
+
+        float outlineWidth = 0.25f;
+        FT_Stroker_Set(stroker, (int)(outlineWidth * 64),
+                       FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0);
+
+        if (FT_Get_Glyph(g, &ftGlyph)) {
+            fprintf(stderr, "FT_Get_Glyph error!\n");
+            return;
+        }
+
+        if (FT_Glyph_StrokeBorder(&ftGlyph, stroker, 0, 1)) {
+            fprintf(stderr, "FT_Glyph_StrokeBoder error!\n");
+            return;
+        }
+
+        FT_Stroker_Done(stroker);
+
+        if (FT_Glyph_To_Bitmap(&ftGlyph, FT_RENDER_MODE_NORMAL, 0, 1)) {
+            fprintf(stderr, "FT_Glyph_To_Bitmap error!\n");
+            return;
+        }
+
+        FT_Done_Glyph(ftGlyph);
+
+        /* pushing the glyphs to the texture */
         if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
             fprintf(stderr, "Loading char %c failed (1)!\n", i);
             continue;
@@ -511,27 +590,46 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
             g->bitmap.buffer
         ));
 
-        c[i].ax = g->advance.x >> 6;
-        c[i].ay = g->advance.y >> 6;
-        c[i].bw = g->bitmap.width;
-        c[i].bh = g->bitmap.rows;
-        c[i].bl = g->bitmap_left;
-        c[i].bt = g->bitmap_top;
+        c[i].ax = g->advance.x >> 6; // AdvanceX
+        c[i].ay = g->advance.y >> 6; // AdvanceY
+        c[i].bw = g->bitmap.width; // Width
+        c[i].bh = g->bitmap.rows; // Height
+        c[i].bl = g->bitmap_left; // BearingLeft
+        c[i].bt = g->bitmap_top; // BearingTop
         c[i].tx = ox / (float)w;
         c[i].ty = oy / (float)h;
+        c[i].Glyph = new cOglAtlasGlyph(i, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
+
+        fprintf(stderr, "New AtlasGlyph %d (ox %d oy %d, w %d, h %d): ax %.2f ay %.2f bw %.2f bh %.2f bl %.2f bt %.2f tx %.2f ty %.2f\n",
+                i, ox, oy, w, h, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
 
         rowh = std::max(rowh, (int)g->bitmap.rows);
         ox += g->bitmap.width + 1;
     }
 
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
-    fprintf(stderr, "Created a %d x %d (%d kB) FontAtlas for fontsize %d\n", w, h, w * h / 1024, height);
+    fprintf(stderr, "Created a %d x %d (%d kB) FontAtlas for fontsize %d, rowh %d, roww %d\n", w, h, w * h / 1024, height, rowh, roww);
 }
 
 cOglFontAtlas::~cOglFontAtlas(void) {
     GL_CHECK(glDeleteTextures(1, &tex));
     fprintf(stderr, "Delete FontAtlas\n");
 }
+
+cOglAtlasGlyph* cOglFontAtlas::Glyph(int sym) const {
+    return c[sym].Glyph;
+}
+
+void cOglFontAtlas::BindTexture(void) {
+    GL_CHECK(glBindTexture(GL_TEXTURE_2D, tex));
+}
+
+/****************************************************************************************
+* cOglFont
+****************************************************************************************/
+FT_Library cOglFont::ftLib = 0;
+cList<cOglFont> *cOglFont::fonts = 0;
+bool cOglFont::initiated = false;
 
 cOglFont::cOglFont(const char *fontName, int charHeight) : name(fontName) {
     size = charHeight;
@@ -667,6 +765,22 @@ cOglGlyph* cOglFont::Glyph(FT_ULong charCode) const {
 }
 
 int cOglFont::Kerning(cOglGlyph *glyph, FT_ULong prevSym) const {
+    int kerning = 0;
+    if (glyph && prevSym) {
+        kerning = glyph->GetKerningCache(prevSym);
+        if (kerning == KERNING_UNKNOWN) {
+            FT_Vector delta;
+            FT_UInt glyph_index = FT_Get_Char_Index(face, glyph->CharCode());
+            FT_UInt glyph_index_prev = FT_Get_Char_Index(face, prevSym);
+            FT_Get_Kerning(face, glyph_index_prev, glyph_index, FT_KERNING_DEFAULT, &delta);
+            kerning = delta.x / 64;
+            glyph->SetKerningCache(prevSym, kerning);
+        }
+    }
+    return kerning;
+}
+
+int cOglFont::AtlasKerning(cOglAtlasGlyph *glyph, FT_ULong prevSym) const {
     int kerning = 0;
     if (glyph && prevSym) {
         kerning = glyph->GetKerningCache(prevSym);
@@ -939,11 +1053,19 @@ void cOglVb::SetShaderProjectionMatrix(GLint width, GLint height) {
     Shaders[shader]->SetMatrix4("projection", projection);
 }
 
-void cOglVb::SetVertexData(GLfloat *vertices, int count) {
+void cOglVb::SetVertexSubData(GLfloat *vertices, int count) {
     if (count == 0)
         count = numVertices;
     GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
     GL_CHECK(glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * count, vertices));
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
+}
+
+void cOglVb::SetVertexData(GLfloat *vertices, int count) {
+    if (count == 0)
+        count = numVertices;
+    GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+    GL_CHECK(glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * (sizeVertex1 + sizeVertex2) * count, vertices, GL_DYNAMIC_DRAW));
     GL_CHECK(glBindBuffer(GL_ARRAY_BUFFER, 0));
 }
 
@@ -1040,7 +1162,7 @@ bool cOglCmdRenderFbToBufferFb::Execute(void) {
     if (!fb->BindTexture())
         return false;
     VertexBuffers[vbTexture]->Bind();
-    VertexBuffers[vbTexture]->SetVertexData(quadVertices);
+    VertexBuffers[vbTexture]->SetVertexSubData(quadVertices);
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
     buffer->Unbind();
@@ -1093,16 +1215,33 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
         return false;
 
     VertexBuffers[vbTexture]->Bind();
-    VertexBuffers[vbTexture]->SetVertexData(quadVertices);
+    VertexBuffers[vbTexture]->SetVertexSubData(quadVertices);
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
-//    GL_CHECK(glFinish());
 
     // eglSwapBuffers and gbm_surface_lock_front_buffer in OsdDrawARGB()
     if (active)
         OsdDrawARGB(0, 0, oFb->Width(), oFb->Height(), 0, 0, oFb->Width(), oFb->Height());
     else
         OsdClose();
+
+    // Read back framebuffer
+    GL_CHECK(glFinish());
+    GLubyte result[oFb->Width() * oFb->Height() * 4];
+    static int scr_nr = 0;
+    char filename[18];
+
+    GLenum fbstatus;
+    GL_CHECK(fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    if(fbstatus != GL_FRAMEBUFFER_COMPLETE)
+        esyslog("[softhddev]ERROR: Framebuffer is not complete! %d\n", fbstatus);
+
+    GL_CHECK(glReadPixels(0, 0, oFb->Width(), oFb->Height(), GL_RGBA, GL_UNSIGNED_BYTE, &result));
+    if (result) {
+        fprintf(stderr, "Write screenshot\n");
+        snprintf(filename, sizeof(filename), "texture%03d.png", scr_nr++);
+        writeImage(filename, oFb->Width(), oFb->Height(), &result, "osd");
+    }
 
     return true;
 }
@@ -1164,7 +1303,7 @@ bool cOglCmdDrawRectangle::Execute(void) {
     fb->Bind();
     VertexBuffers[vbRect]->DisableBlending();
     VertexBuffers[vbRect]->Bind();
-    VertexBuffers[vbRect]->SetVertexData(vertices);
+    VertexBuffers[vbRect]->SetVertexSubData(vertices);
     VertexBuffers[vbRect]->DrawArrays();
     VertexBuffers[vbRect]->Unbind();
     VertexBuffers[vbRect]->EnableBlending();
@@ -1214,7 +1353,7 @@ bool cOglCmdDrawEllipse::Execute(void) {
     fb->Bind();
     VertexBuffers[vbEllipse]->DisableBlending();
     VertexBuffers[vbEllipse]->Bind();
-    VertexBuffers[vbEllipse]->SetVertexData(vertices, numVertices);
+    VertexBuffers[vbEllipse]->SetVertexSubData(vertices, numVertices);
     VertexBuffers[vbEllipse]->DrawArrays(numVertices);
     VertexBuffers[vbEllipse]->Unbind();
     VertexBuffers[vbEllipse]->EnableBlending();
@@ -1432,7 +1571,7 @@ bool cOglCmdDrawSlope::Execute(void) {
     fb->Bind();
     VertexBuffers[vbSlope]->DisableBlending();
     VertexBuffers[vbSlope]->Bind();
-    VertexBuffers[vbSlope]->SetVertexData(vertices, numVertices);
+    VertexBuffers[vbSlope]->SetVertexSubData(vertices, numVertices);
     VertexBuffers[vbSlope]->DrawArrays(numVertices);
     VertexBuffers[vbSlope]->Unbind();
     VertexBuffers[vbSlope]->EnableBlending();
@@ -1444,7 +1583,7 @@ bool cOglCmdDrawSlope::Execute(void) {
 
 //------------------ cOglCmdDrawText --------------------
 cOglCmdDrawText::cOglCmdDrawText( cOglFb *fb, GLint x, GLint y, unsigned int *symbols, GLint limitX, 
-                                  const char *name, int fontSize, tColor colorText) : cOglCmd(fb), fontName(name)  {
+                                  const char *name, int fontSize, tColor colorText, int length) : cOglCmd(fb), fontName(name)  {
     this->x = x;
     this->y = y;
     this->limitX = limitX;
@@ -1452,6 +1591,7 @@ cOglCmdDrawText::cOglCmdDrawText( cOglFb *fb, GLint x, GLint y, unsigned int *sy
     this->fontSize = fontSize;
     this->symbols = symbols;
     this->fontName = name;
+    this->length = length;
 }
 
 cOglCmdDrawText::~cOglCmdDrawText(void) {
@@ -1463,9 +1603,6 @@ bool cOglCmdDrawText::Execute(void) {
     if (!f)
         return false;
 
-    cOglFontAtlas *fa = f->Atlas();
-    fprintf(stderr, "DrawText, Loaded Atlas height %d\n", fa->Height());
-
     VertexBuffers[vbText]->ActivateShader();
     VertexBuffers[vbText]->SetShaderColor(colorText);
     VertexBuffers[vbText]->SetShaderProjectionMatrix(fb->Width(), fb->Height());
@@ -1474,90 +1611,134 @@ bool cOglCmdDrawText::Execute(void) {
     VertexBuffers[vbText]->Bind();
 
     int xGlyph = x;
+    int yGlyph = y;
     int fontHeight = f->Height();
     int bottom = f->Bottom();
     FT_ULong sym = 0;
     FT_ULong prevSym = 0;
     int kerning = 0;
 
-/*
+    // Check, if we only have symbols, which are in our atlas
+    int unknown_char = 0;
     for (int i = 0; symbols[i]; i++) {
-        sym = symbols[i];
-        cOglGlyph *g = f->Glyph(sym);
-        if (!g) {
-            esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
+        if ((symbols[i] < MIN_CHARCODE) || (symbols[i] > MAX_CHARCODE)) {
+            if (symbols[i]) {
+                unknown_char = symbols[i];
+                break;
+            }
         }
-
-        if ( limitX && xGlyph + g->AdvanceX() > limitX )
-            break;
-
-        kerning = f->Kerning(g, prevSym);
-        prevSym = sym;
-
-        GLfloat x1 = xGlyph + kerning + g->BearingLeft();          //left
-        GLfloat y1 = y + (fontHeight - bottom - g->BearingTop());  //top
-        GLfloat x2 = x1 + g->Width();                              //right
-        GLfloat y2 = y1 + g->Height();                             //bottom
-
-        GLfloat vertices[] = {
-            x1, y2,   0.0, 1.0,     // left bottom
-            x1, y1,   0.0, 0.0,     // left top
-            x2, y1,   1.0, 0.0,     // right top
-
-            x1, y2,   0.0, 1.0,     // left bottom
-            x2, y1,   1.0, 0.0,     // right top
-            x2, y2,   1.0, 1.0      // right bottom     
-        };
-
-
-        xGlyph += kerning + g->AdvanceX();
-
-        if ( xGlyph > fb->Width() - 1 )
-            break;
-
     }
 
-    g->BindTexture();
-    VertexBuffers[vbText]->SetVertexData(vertices);
-    VertexBuffers[vbText]->DrawArrays();
-*/
+    if (!unknown_char) {
+        cOglFontAtlas *fa = f->Atlas();
+        fprintf(stderr, "DrawText, loaded Atlas height %d\n", fa->FontHeight());
 
-    for (int i = 0; symbols[i]; i++) {
-        sym = symbols[i];
-        cOglGlyph *g = f->Glyph(sym);
-        if (!g) {
-            esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
+        int n = 0;
+        GLfloat *vertices = new GLfloat[4 * 6 * length];
+
+        for (int i = 0; symbols[i]; i++) {
+            sym = symbols[i];
+
+            cOglAtlasGlyph *g;
+            // Get the glyph from the font atlas for ASCII code MIN_CHARCODE-MAX_CHARCODE
+            g = fa->Glyph(sym);
+
+            if (!g) {
+                esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
+            }
+
+            if ( limitX && xGlyph + g->AdvanceX() > limitX )
+                break;
+
+            kerning = f->AtlasKerning(g, prevSym);
+            prevSym = sym;
+
+            GLfloat x2 = xGlyph + kerning + g->BearingLeft();
+            GLfloat y2 = y + (fontHeight - bottom - g->BearingTop());  //top
+            GLfloat w = g->Width();
+            GLfloat h = g->Height();
+
+            vertices[n++] = x2;
+            vertices[n++] = y2;
+            vertices[n++] = g->XOffset();
+            vertices[n++] = g->YOffset();
+
+            vertices[n++] = x2 + w;
+            vertices[n++] = y2;
+            vertices[n++] = g->XOffset() + g->Width() / (float)fa->Width();
+            vertices[n++] = g->YOffset();
+
+            vertices[n++] = x2;
+            vertices[n++] = y2 + h;
+            vertices[n++] = g->XOffset();
+            vertices[n++] = g->YOffset() + g->Height() / (float)fa->Height();
+
+            vertices[n++] = x2 + w;
+            vertices[n++] = y2;
+            vertices[n++] = g->XOffset() + g->Width() / (float)fa->Width();
+            vertices[n++] = g->YOffset();
+
+            vertices[n++] = x2;
+            vertices[n++] = y2 + h;
+            vertices[n++] = g->XOffset();
+            vertices[n++] = g->YOffset() + g->Height() / (float)fa->Height();
+
+            vertices[n++] = x2 + w;
+            vertices[n++] = y2 + h;
+            vertices[n++] = g->XOffset() + g->Width() / (float)fa->Width();
+            vertices[n++] = g->YOffset() + g->Height() / (float)fa->Height();
+
+            xGlyph += kerning + g->AdvanceX();
+            yGlyph += kerning + g->AdvanceY();
+
+
+            if ( xGlyph > fb->Width() - 1 )
+                break;
         }
 
-        if ( limitX && xGlyph + g->AdvanceX() > limitX )
-            break;
+        fa->BindTexture();
+        VertexBuffers[vbText]->SetVertexData(vertices, (n / 4));
+        VertexBuffers[vbText]->DrawArrays(n / 4);
+    } else {
+        fprintf(stderr, "DrawText without font atlas\n");
+        esyslog("[softhddev]WARNING: DrawText without font atlas %d", unknown_char);
+        for (int i = 0; symbols[i]; i++) {
+            sym = symbols[i];
+            cOglGlyph *g = f->Glyph(sym);
+            if (!g) {
+                esyslog("[softhddev]ERROR: could not load glyph %lx", sym);
+            }
 
-        kerning = f->Kerning(g, prevSym);
-        prevSym = sym;
+            if ( limitX && xGlyph + g->AdvanceX() > limitX )
+                break;
 
-        GLfloat x1 = xGlyph + kerning + g->BearingLeft();          //left
-        GLfloat y1 = y + (fontHeight - bottom - g->BearingTop());  //top
-        GLfloat x2 = x1 + g->Width();                              //right
-        GLfloat y2 = y1 + g->Height();                             //bottom
+            kerning = f->Kerning(g, prevSym);
+            prevSym = sym;
 
-        GLfloat vertices[] = {
-            x1, y2,   0.0, 1.0,     // left bottom
-            x1, y1,   0.0, 0.0,     // left top
-            x2, y1,   1.0, 0.0,     // right top
+            GLfloat x1 = xGlyph + kerning + g->BearingLeft();          //left
+            GLfloat y1 = y + (fontHeight - bottom - g->BearingTop());  //top
+            GLfloat x2 = x1 + g->Width();                              //right
+            GLfloat y2 = y1 + g->Height();                             //bottom
 
-            x1, y2,   0.0, 1.0,     // left bottom
-            x2, y1,   1.0, 0.0,     // right top
-            x2, y2,   1.0, 1.0      // right bottom     
-        };
+            GLfloat vertices[] = {
+                x1, y2,   0.0, 1.0,     // left bottom
+                x1, y1,   0.0, 0.0,     // left top
+                x2, y1,   1.0, 0.0,     // right top
 
-        g->BindTexture();
-        VertexBuffers[vbText]->SetVertexData(vertices);
-        VertexBuffers[vbText]->DrawArrays();
+                x1, y2,   0.0, 1.0,     // left bottom
+                x2, y1,   1.0, 0.0,     // right top
+                x2, y2,   1.0, 1.0      // right bottom
+            };
 
-        xGlyph += kerning + g->AdvanceX();
+            g->BindTexture();
+            VertexBuffers[vbText]->SetVertexData(vertices);
+            VertexBuffers[vbText]->DrawArrays();
 
-        if ( xGlyph > fb->Width() - 1 )
-            break;
+            xGlyph += kerning + g->AdvanceX();
+
+            if ( xGlyph > fb->Width() - 1 )
+                break;
+        }
     }
 
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
@@ -1629,7 +1810,7 @@ bool cOglCmdDrawImage::Execute(void) {
     if (overlay)
         VertexBuffers[vbTexture]->DisableBlending();
     VertexBuffers[vbTexture]->Bind();
-    VertexBuffers[vbTexture]->SetVertexData(quadVertices);
+    VertexBuffers[vbTexture]->SetVertexSubData(quadVertices);
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
     if (overlay)
@@ -1674,7 +1855,7 @@ bool cOglCmdDrawTexture::Execute(void) {
     fb->Bind();
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, imageRef->texture));
     VertexBuffers[vbTexture]->Bind();
-    VertexBuffers[vbTexture]->SetVertexData(quadVertices);
+    VertexBuffers[vbTexture]->SetVertexSubData(quadVertices);
     VertexBuffers[vbTexture]->DrawArrays();
     VertexBuffers[vbTexture]->Unbind();
     fb->Unbind();
@@ -2186,7 +2367,7 @@ void cOglPixmap::DrawText(const cPoint &Point, const char *s, tColor ColorFg, tC
             }
         }
     }
-    oglThread->DoCmd(new cOglCmdDrawText(fb, x, y, symbols, limitX, Font->FontName(), Font->Size(), ColorFg));
+    oglThread->DoCmd(new cOglCmdDrawText(fb, x, y, symbols, limitX, Font->FontName(), Font->Size(), ColorFg, len));
 
     SetDirty();
     MarkDrawPortDirty(r);
