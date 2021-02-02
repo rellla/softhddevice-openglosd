@@ -461,9 +461,6 @@ void cOglAtlasGlyph::SetKerningCache(FT_ULong prevSym, int kerning) {
 /****************************************************************************************
 * cOglFontAtlas
 ****************************************************************************************/
-#define MAX_ATLAS_WIDTH 1024
-#define MIN_CHARCODE 32
-#define MAX_CHARCODE 126
 cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
     this->fontheight = height;
 
@@ -480,11 +477,43 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
 
     /* Find the minimum size for the texture holding all visible ASCII characters */
     for (int i = MIN_CHARCODE; i <= MAX_CHARCODE; i++) {
-        if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
+        if (FT_Load_Char(face, i, FT_LOAD_NO_BITMAP)) {
             fprintf(stderr, "Loading char %c failed (1)!\n", i);
             continue;
         }
-        if (roww + g->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
+
+        // do some glyph manipulation
+        FT_Glyph ftGlyph;
+        FT_Stroker stroker;
+        if (FT_Stroker_New(g->library, &stroker)) {
+            fprintf(stderr, "FT_Stroker_New error!\n");
+            return;
+        }
+
+        float outlineWidth = 0.25f;
+        FT_Stroker_Set(stroker, (int)(outlineWidth * 64),
+                       FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0);
+
+        if (FT_Get_Glyph(g, &ftGlyph)) {
+            fprintf(stderr, "FT_Get_Glyph error!\n");
+            return;
+        }
+
+        if (FT_Glyph_StrokeBorder(&ftGlyph, stroker, 0, 1)) {
+            fprintf(stderr, "FT_Glyph_StrokeBoder error!\n");
+            return;
+        }
+
+        FT_Stroker_Done(stroker);
+
+        if (FT_Glyph_To_Bitmap(&ftGlyph, FT_RENDER_MODE_NORMAL, 0, 1)) {
+            fprintf(stderr, "FT_Glyph_To_Bitmap error!\n");
+            return;
+        }
+
+        FT_BitmapGlyph bGlyph = (FT_BitmapGlyph)ftGlyph;
+
+        if (roww + bGlyph->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
             w = std::max(w, roww);
             h += rowh;
             fprintf(stderr, "New row with rowh %d, new height %d\n", rowh, h);
@@ -492,9 +521,9 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
             rowh = 0;
             rows++;
         }
-        roww += g->bitmap.width + 1;
-        fprintf(stderr, "rowh is max of rowh %d and (int)g->bitmap.rows %d\n", rowh, (int)g->bitmap.rows);
-        rowh = std::max(rowh, (int)g->bitmap.rows);
+        roww += bGlyph->bitmap.width + 1;
+        fprintf(stderr, "rowh is max of rowh %d and (int)g->bitmap.rows %d\n", rowh, (int)bGlyph->bitmap.rows);
+        rowh = std::max(rowh, (int)bGlyph->bitmap.rows);
     }
 
     w = std::max(w, roww);
@@ -528,14 +557,14 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
 
     rowh = 0;
 
+    // Now do the real upload
     for (int i = MIN_CHARCODE; i <= MAX_CHARCODE; i++) {
-        // do some glyph manipulation
-
         if (FT_Load_Char(face, i, FT_LOAD_NO_BITMAP)) {
             fprintf(stderr, "Loading char %c failed (1)!\n", i);
             continue;
         }
 
+        // do some glyph manipulation
         FT_Glyph ftGlyph;
         FT_Stroker stroker;
         if (FT_Stroker_New(g->library, &stroker)) {
@@ -563,16 +592,10 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
             fprintf(stderr, "FT_Glyph_To_Bitmap error!\n");
             return;
         }
+        FT_BitmapGlyph bGlyph = (FT_BitmapGlyph)ftGlyph;
 
-        FT_Done_Glyph(ftGlyph);
-
-        /* pushing the glyphs to the texture */
-        if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
-            fprintf(stderr, "Loading char %c failed (1)!\n", i);
-            continue;
-        }
-
-        if (ox + g->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
+        // pushing the glyphs to the texture
+        if (ox + bGlyph->bitmap.width + 1 >= MAX_ATLAS_WIDTH) {
             oy += rowh;
             rowh = 0;
             ox = 0;
@@ -583,28 +606,31 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
             0,
             ox,
             oy,
-            g->bitmap.width,
-            g->bitmap.rows,
+            bGlyph->bitmap.width,
+            bGlyph->bitmap.rows,
             GL_LUMINANCE,
             GL_UNSIGNED_BYTE,
-            g->bitmap.buffer
+            bGlyph->bitmap.buffer
         ));
 
-        c[i].ax = g->advance.x >> 6; // AdvanceX
-        c[i].ay = g->advance.y >> 6; // AdvanceY
-        c[i].bw = g->bitmap.width; // Width
-        c[i].bh = g->bitmap.rows; // Height
-        c[i].bl = g->bitmap_left; // BearingLeft
-        c[i].bt = g->bitmap_top; // BearingTop
+        c[i].ax = bGlyph->root.advance.x >> 16; // AdvanceX
+        c[i].ay = bGlyph->root.advance.y >> 16; // AdvanceX
+        c[i].bw = bGlyph->bitmap.width; // Width
+        c[i].bh = bGlyph->bitmap.rows; // Height
+        c[i].bl = bGlyph->left; // BearingLeft
+        c[i].bt = bGlyph->top; // BearingTop
         c[i].tx = ox / (float)w;
         c[i].ty = oy / (float)h;
+
         c[i].Glyph = new cOglAtlasGlyph(i, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
 
         fprintf(stderr, "New AtlasGlyph %d (ox %d oy %d, w %d, h %d): ax %.2f ay %.2f bw %.2f bh %.2f bl %.2f bt %.2f tx %.2f ty %.2f\n",
                 i, ox, oy, w, h, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
 
-        rowh = std::max(rowh, (int)g->bitmap.rows);
-        ox += g->bitmap.width + 1;
+        rowh = std::max(rowh, (int)bGlyph->bitmap.rows);
+        ox += bGlyph->bitmap.width + 1;
+
+        FT_Done_Glyph(ftGlyph);
     }
 
     GL_CHECK(glBindTexture(GL_TEXTURE_2D, 0));
@@ -1226,6 +1252,7 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
         OsdClose();
 
     // Read back framebuffer
+#ifdef WRITE_PNG
     GL_CHECK(glFinish());
     GLubyte result[oFb->Width() * oFb->Height() * 4];
     static int scr_nr = 0;
@@ -1242,7 +1269,7 @@ bool cOglCmdCopyBufferToOutputFb::Execute(void) {
         snprintf(filename, sizeof(filename), "texture%03d.png", scr_nr++);
         writeImage(filename, oFb->Width(), oFb->Height(), &result, "osd");
     }
-
+#endif
     return true;
 }
 
@@ -1623,7 +1650,7 @@ bool cOglCmdDrawText::Execute(void) {
     for (int i = 0; symbols[i]; i++) {
         if ((symbols[i] < MIN_CHARCODE) || (symbols[i] > MAX_CHARCODE)) {
             if (symbols[i]) {
-                unknown_char = symbols[i];
+                unknown_char = i;
                 break;
             }
         }
@@ -1700,7 +1727,7 @@ bool cOglCmdDrawText::Execute(void) {
         VertexBuffers[vbText]->SetVertexData(vertices, (n / 4));
         VertexBuffers[vbText]->DrawArrays(n / 4);
     } else {
-        fprintf(stderr, "DrawText without font atlas\n");
+        fprintf(stderr, "DrawText without font atlas because of %d\n", unknown_char);
         esyslog("[softhddev]WARNING: DrawText without font atlas %d", unknown_char);
         for (int i = 0; symbols[i]; i++) {
             sym = symbols[i];

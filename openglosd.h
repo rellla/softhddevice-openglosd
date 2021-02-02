@@ -163,6 +163,9 @@ public:
 /****************************************************************************************
 * cOglFontAtlas
 ****************************************************************************************/
+#define MAX_ATLAS_WIDTH 1024
+#define MIN_CHARCODE 32
+#define MAX_CHARCODE 255
 class cOglFontAtlas {
 private:
     GLuint tex;
@@ -178,7 +181,7 @@ private:
         float tx;
         float ty;
         cOglAtlasGlyph *Glyph;
-    } c[128];
+    } c[MAX_CHARCODE];
     int fontheight;
 public:
     cOglFontAtlas(FT_Face face, int height);

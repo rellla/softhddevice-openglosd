@@ -20,7 +20,7 @@ CONFIG += -DDEBUG 				# enable debug output+functions
 ifeq ($(GLES),1)
 CONFIG += -DUSE_GLES
 CONFIG += -DGL_DEBUG
-CONFIG += -DWRITE_PNG
+#CONFIG += -DWRITE_PNG
 endif
 #CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
 #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
