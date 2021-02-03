@@ -473,8 +473,6 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
     w = 0;
     h = 0;
 
-    memset(c, 0, sizeof c);
-
     /* Find the minimum size for the texture holding all visible ASCII characters */
     for (int i = MIN_CHARCODE; i <= MAX_CHARCODE; i++) {
         if (FT_Load_Char(face, i, FT_LOAD_NO_BITMAP)) {
@@ -524,6 +522,8 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
         roww += bGlyph->bitmap.width + 1;
         fprintf(stderr, "rowh is max of rowh %d and (int)g->bitmap.rows %d\n", rowh, (int)bGlyph->bitmap.rows);
         rowh = std::max(rowh, (int)bGlyph->bitmap.rows);
+
+        FT_Done_Glyph(ftGlyph);
     }
 
     w = std::max(w, roww);
@@ -613,19 +613,18 @@ cOglFontAtlas::cOglFontAtlas(FT_Face face, int height) {
             bGlyph->bitmap.buffer
         ));
 
-        c[i].ax = bGlyph->root.advance.x >> 16; // AdvanceX
-        c[i].ay = bGlyph->root.advance.y >> 16; // AdvanceX
-        c[i].bw = bGlyph->bitmap.width; // Width
-        c[i].bh = bGlyph->bitmap.rows; // Height
-        c[i].bl = bGlyph->left; // BearingLeft
-        c[i].bt = bGlyph->top; // BearingTop
-        c[i].tx = ox / (float)w;
-        c[i].ty = oy / (float)h;
+        float ax = bGlyph->root.advance.x >> 16; // AdvanceX
+        float ay = bGlyph->root.advance.y >> 16; // AdvanceX
+        float bw = bGlyph->bitmap.width; // Width
+        float bh = bGlyph->bitmap.rows; // Height
+        float bl = bGlyph->left; // BearingLeft
+        float bt = bGlyph->top; // BearingTop
+        float tx = ox / (float)w;
+        float ty = oy / (float)h;
 
-        c[i].Glyph = new cOglAtlasGlyph(i, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
-
+        Glyph[i] = new cOglAtlasGlyph(i, ax, ay, bw, bh, bl, bt, tx, ty);
         fprintf(stderr, "New AtlasGlyph %d (ox %d oy %d, w %d, h %d): ax %.2f ay %.2f bw %.2f bh %.2f bl %.2f bt %.2f tx %.2f ty %.2f\n",
-                i, ox, oy, w, h, c[i].ax, c[i].ay, c[i].bw, c[i].bh, c[i].bl, c[i].bt, c[i].tx, c[i].ty);
+                i, ox, oy, w, h, ax, ay, bw, bh, bl, bt, tx, ty);
 
         rowh = std::max(rowh, (int)bGlyph->bitmap.rows);
         ox += bGlyph->bitmap.width + 1;
@@ -642,8 +641,8 @@ cOglFontAtlas::~cOglFontAtlas(void) {
     fprintf(stderr, "Delete FontAtlas\n");
 }
 
-cOglAtlasGlyph* cOglFontAtlas::Glyph(int sym) const {
-    return c[sym].Glyph;
+cOglAtlasGlyph* cOglFontAtlas::GetGlyph(int sym) const {
+    return Glyph[sym];
 }
 
 void cOglFontAtlas::BindTexture(void) {
@@ -1668,7 +1667,7 @@ bool cOglCmdDrawText::Execute(void) {
 
             cOglAtlasGlyph *g;
             // Get the glyph from the font atlas for ASCII code MIN_CHARCODE-MAX_CHARCODE
-            g = fa->Glyph(sym);
+            g = fa->GetGlyph(sym);
 
             if (!g) {
                 esyslog("[softhddev]ERROR: could not load glyph %lx", sym);

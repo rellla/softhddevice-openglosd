@@ -171,22 +171,12 @@ private:
     GLuint tex;
     int w;
     int h;
-    struct {
-        float ax;
-        float ay;
-        float bw;
-        float bh;
-        float bl;
-        float bt;
-        float tx;
-        float ty;
-        cOglAtlasGlyph *Glyph;
-    } c[MAX_CHARCODE];
     int fontheight;
+    cOglAtlasGlyph* Glyph[MAX_CHARCODE];
 public:
     cOglFontAtlas(FT_Face face, int height);
     virtual ~cOglFontAtlas(void);
-    cOglAtlasGlyph* Glyph(int sym) const;
+    cOglAtlasGlyph* GetGlyph(int sym) const;
     int FontHeight(void) const { return fontheight; }
     int Height(void) const { return h; }
     int Width(void) const { return w; }
